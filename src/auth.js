@@ -1,5 +1,4 @@
 const SESSION_KEY = "tt_session";
-const USERS_KEY = "tt_users";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
 function readJSON(key, fallback) {
@@ -8,10 +7,6 @@ function readJSON(key, fallback) {
   } catch {
     return fallback;
   }
-}
-
-function getUsers() {
-  return readJSON(USERS_KEY, {});
 }
 
 function currentSession() {
@@ -93,13 +88,13 @@ export async function login(email, password) {
   return saveSession(data);
 }
 
-export function signup({ name, email, password }) {
+export async function signup({ name, email, password }) {
   const key = email.trim().toLowerCase();
-  const users = getUsers();
-  if (users[key]) throw new Error("이미 가입된 이메일입니다.");
-  users[key] = { name: name.trim(), password };
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  localStorage.setItem(SESSION_KEY, JSON.stringify({ email: key, name: name.trim() }));
+  const data = await requestJSON("/api/auth/signup", {
+    method: "POST",
+    body: { name: name.trim(), email: key, password },
+  });
+  return saveSession(data);
 }
 
 export function logout() {

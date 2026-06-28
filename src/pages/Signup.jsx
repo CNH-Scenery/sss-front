@@ -13,9 +13,11 @@ export default function Signup() {
   const [confirm, setConfirm] = useState("");
   const [errors, setErrors] = useState({});
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setError("");
     const next = {};
     if (!name.trim()) next.name = "이름을 입력하세요.";
@@ -24,11 +26,14 @@ export default function Signup() {
     if (confirm !== password) next.confirm = "비밀번호가 일치하지 않습니다.";
     setErrors(next);
     if (Object.keys(next).length > 0) return;
+    setSubmitting(true);
     try {
-      signup({ name, email, password });
+      await signup({ name, email, password });
       navigate("/", { replace: true });
     } catch (ex) {
       setError(ex.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -82,7 +87,9 @@ export default function Signup() {
           error={errors.confirm}
         />
         <FormError>{error}</FormError>
-        <PrimaryButton type="submit">회원가입 →</PrimaryButton>
+        <PrimaryButton type="submit" disabled={submitting}>
+          {submitting ? "가입 중..." : "회원가입 →"}
+        </PrimaryButton>
       </form>
     </AuthLayout>
   );
