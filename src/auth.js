@@ -1,5 +1,11 @@
 const SESSION_KEY = "tt_session";
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+// 기본은 상대경로(""): 개발은 Vite 프록시, 배포는 vercel.json 리라이트가 /api 를
+// 백엔드로 전달한다 → CORS·환경변수 불필요. 특별한 경우에만 VITE_API_BASE_URL 로
+// 절대 주소를 override 한다. 이때 값에 BOM(U+FEFF)·공백·개행이 섞여 들어올 수 있어
+// trim 으로 제거한다(trim 은 U+FEFF 도 공백으로 취급). 끝 슬래시도 정리.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "")
+  .trim()
+  .replace(/\/+$/, "");
 
 function readJSON(key, fallback) {
   try {
@@ -50,7 +56,7 @@ async function requestJSON(path, { method = "GET", body, auth = false } = {}) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new Error("백엔드 서버에 연결할 수 없습니다. 서버 실행 상태와 VITE_API_BASE_URL을 확인하세요.");
+    throw new Error("백엔드 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
   }
 
   const contentType = response.headers.get("content-type") || "";
