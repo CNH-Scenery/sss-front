@@ -6,6 +6,7 @@ import SurveyTab from "./tabs/SurveyTab.jsx";
 import StrategyTab from "./tabs/StrategyTab.jsx";
 import BacktestTab from "./tabs/BacktestTab.jsx";
 import MonitorTab from "./tabs/MonitorTab.jsx";
+import ChatTab from "./tabs/ChatTab.jsx";
 import SettingsTab from "./tabs/SettingsTab.jsx";
 import AlertToasts from "./components/AlertToasts.jsx";
 import { notifPermission, requestNotifyPermission, sendNotification } from "./notify.js";
@@ -426,6 +427,7 @@ class App extends React.Component {
   goStrategy=()=>this.setState({screen:'strategy'});
   goBacktest=()=>this.setState({screen:'backtest'});
   goMonitor=()=>this.setState({screen:'monitor'});
+  goChat=()=>this.setState({screen:'chat'});
   goSettings=()=>this.setState({screen:'settings'});
   _setSurvey=(i)=>{ i=Math.max(0,Math.min(9,i)); const r=this.state.responses[i]; this.setState({surveyIndex:i,draftAction:r?r.action:null,draftReason:r?r.reason:'',pendingDrawing:null}); };
   goPrev=()=>this._setSurvey(this.state.surveyIndex-1);
@@ -577,10 +579,10 @@ class App extends React.Component {
       lastCandleTime:s.lastCandleTime,
       livePriceFmt:hasLivePrice?livePrice.toLocaleString():'-',
       topPriceColor,
-      navSurveyStyle:nav('survey'),navStrategyStyle:nav('strategy'),navBacktestStyle:nav('backtest'),navMonitorStyle:nav('monitor'),navSettingsStyle:nav('settings'),
+      navSurveyStyle:nav('survey'),navStrategyStyle:nav('strategy'),navBacktestStyle:nav('backtest'),navMonitorStyle:nav('monitor'),navChatStyle:nav('chat'),navSettingsStyle:nav('settings'),
       doneCount:this.doneCount(),
-      isSurvey:s.screen==='survey',isStrategy:s.screen==='strategy',isBacktest:s.screen==='backtest',isMonitor:s.screen==='monitor',isSettings:s.screen==='settings',
-      goSurvey:this.goSurvey,goStrategy:this.goStrategy,goBacktest:this.goBacktest,goMonitor:this.goMonitor,goSettings:this.goSettings,
+      isSurvey:s.screen==='survey',isStrategy:s.screen==='strategy',isBacktest:s.screen==='backtest',isMonitor:s.screen==='monitor',isChat:s.screen==='chat',isSettings:s.screen==='settings',
+      goSurvey:this.goSurvey,goStrategy:this.goStrategy,goBacktest:this.goBacktest,goMonitor:this.goMonitor,goChat:this.goChat,goSettings:this.goSettings,
       progressWidth:(this.doneCount()/10*100)+'%',
       curMarket:cur.market,curTf:cur.tf,surveyNo:s.surveyIndex+1,
       surveyTitle:cur.title,surveyIntent:cur.intent,surveyReason:cur.reason,surveyTags:cur.tags||[],
@@ -672,6 +674,7 @@ class App extends React.Component {
               {v.isStrategy && <StrategyTab v={v} />}
               {v.isBacktest && <BacktestTab v={v} />}
               {v.isMonitor && <MonitorTab v={v} />}
+              {v.isChat && <ChatTab v={v} />}
               {v.isSettings && <SettingsTab v={v} />}
             </div>
           </div>

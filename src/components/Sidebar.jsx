@@ -22,6 +22,12 @@ export default function Sidebar({ v }) {
               <span>모니터링</span>
             </div>
             <div style={css(`height:1px;background:#1a212c;margin:8px 6px`)}></div>
+            <div style={css(`font-size:10px;letter-spacing:0.09em;color:#5a6472;font-weight:800;padding:4px 10px 8px`)}>AI 어시스턴트</div>
+            <div onClick={v.goChat} style={css(v.navChatStyle)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              <span>AI 시세 챗봇</span>
+            </div>
+            <div style={css(`height:1px;background:#1a212c;margin:8px 6px`)}></div>
             <div style={css(`font-size:10px;letter-spacing:0.09em;color:#5a6472;font-weight:800;padding:4px 10px 8px`)}>설정</div>
             <div onClick={v.goSettings} style={css(v.navSettingsStyle)}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>

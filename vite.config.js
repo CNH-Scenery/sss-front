@@ -72,6 +72,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/upbit/, ''),
       },
+      // 그 외 /api/* 는 백엔드(sss-back, :8000)로 전달. 코드생성(Claude)·인증 등.
+      // (/api/upbit/daily 는 위 localUpbitApi 미들웨어가 먼저 가로채 로컬 처리.)
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

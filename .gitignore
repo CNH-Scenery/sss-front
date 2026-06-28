@@ -5,3 +5,8 @@ dist
 .vite
 *.log
 package-lock.json
+
+# Secrets — never commit. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
