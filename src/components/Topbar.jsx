@@ -1,7 +1,15 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { css } from "../css.js";
+import { currentUser, logout } from "../auth.js";
 
 export default function Topbar({ v }) {
+  const navigate = useNavigate();
+  const user = currentUser();
+  const onLogout = () => {
+    logout();
+    navigate("/login", { replace: true });
+  };
   return (
         <div style={css(`display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 20px;border-bottom:1px solid #1f2630;background:#0c1118;flex:0 0 auto`)}>
           <div style={css(`display:flex;align-items:center;gap:10px`)}>
@@ -14,6 +22,9 @@ export default function Topbar({ v }) {
             <span style={css(`color:#7d8794`)}>업비트 시세 연결됨</span>
             <span style={css(`color:#e6edf3;margin-left:8px`)}>KRW-BTC</span>
             <span style={{ color: v.topPriceColor }}>{v.livePriceFmt}</span>
+            <span style={css(`width:1px;height:18px;background:#1f2630;margin:0 4px`)}></span>
+            {user && <span style={css(`color:#9aa4b1;font-family:'Pretendard',sans-serif`)}>{user.name}</span>}
+            <button onClick={onLogout} style={css(`background:#0e131b;border:1px solid #1f2630;color:#9aa4b1;border-radius:7px;padding:5px 11px;font-size:12px;cursor:pointer;font-family:'Pretendard',sans-serif`)}>로그아웃</button>
           </div>
         </div>
   );
