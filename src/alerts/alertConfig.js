@@ -6,6 +6,7 @@
 // action/type 외 필드는 모두 선택사항.
 
 const CONFIG_KEY = "tt_alert_config";
+const WEATHER_IMAGE = "/weather-news-card.jpg";
 
 export const ACTION_LABELS = { BUY: "매수 신호", SELL: "매도 신호", HOLD: "관망", WARN: "경고", INFO: "알림" };
 export const PLACEHOLDERS = ["action", "actionLabel", "market", "price", "reason", "time", "severity"];
@@ -18,7 +19,7 @@ export const ALERT_MODES = [
 
 export const DEFAULT_CONFIG = {
   backendUrl: "",                                  // ws(s)://… 비어있으면 백엔드 소켓 비활성
-  alertMode: "expert",
+  alertMode: "weather",
   titleTemplate: "{actionLabel} · {market}",
   bodyTemplate: "{reason} · {price}원 · {time}",
   fields: { market: true, price: true, reason: true, time: true },
@@ -127,11 +128,41 @@ function scaledIndex(price) {
 
 const STEALTH_COPY = {
   weather: {
-    BUY: { title: "오늘의 날씨 · 맑음 전환", body: "기압이 올라 바깥 공기가 좋아졌습니다. 산책 타이밍을 확인하세요.", status: "맑음 전환" },
-    SELL: { title: "날씨 속보 · 소나기 주의", body: "상층 기류가 거칠어졌습니다. 잠깐 실내 대기가 좋아 보입니다.", status: "소나기 주의" },
-    HOLD: { title: "생활 날씨 · 구름 많음", body: "큰 변화 없이 구름이 머무는 중입니다. 다음 관측을 기다립니다.", status: "구름 많음" },
-    WARN: { title: "기상 특보 · 확인 필요", body: "예상보다 변동이 커졌습니다. 창가 쪽 상황을 한 번 확인하세요.", status: "특보" },
-    INFO: { title: "기상 알림 · 정기 관측", body: "새 관측값이 도착했습니다. 필요할 때만 살짝 확인하세요.", status: "정기 관측" },
+    BUY: {
+      title: "오늘의 날씨 뉴스 · 맑음 전환",
+      headline: "햇살이 열리며 외출하기 좋은 흐름이에요",
+      body: "기압이 안정되고 하늘빛이 밝아졌습니다. 산책 타이밍을 가볍게 확인해 보세요.",
+      status: "맑음 전환",
+      kicker: "맑음 리포트",
+    },
+    SELL: {
+      title: "날씨 속보 · 소나기 주의",
+      headline: "작은 소나기 구름이 빠르게 다가오고 있어요",
+      body: "상층 기류가 거칠어졌습니다. 잠깐 실내 대기가 좋아 보이는 구간입니다.",
+      status: "소나기 주의",
+      kicker: "우산 리포트",
+    },
+    HOLD: {
+      title: "생활 날씨 · 구름 많음",
+      headline: "구름이 머물지만 큰 변화는 아직 없어요",
+      body: "바람은 잔잔하고 관측 흐름도 차분합니다. 다음 관측을 기다려도 괜찮습니다.",
+      status: "구름 많음",
+      kicker: "구름 리포트",
+    },
+    WARN: {
+      title: "기상 특보 · 확인 필요",
+      headline: "예보보다 변동성이 커져 추가 확인이 필요해요",
+      body: "갑작스러운 기류 변화가 기록됐습니다. 창가 쪽 상황을 한 번 살펴보세요.",
+      status: "특보",
+      kicker: "특보 리포트",
+    },
+    INFO: {
+      title: "기상 알림 · 정기 관측",
+      headline: "새 관측값이 도착했어요",
+      body: "관측소가 최신 흐름을 업데이트했습니다. 필요할 때만 살짝 확인하세요.",
+      status: "정기 관측",
+      kicker: "정기 리포트",
+    },
   },
   office: {
     BUY: { title: "회의 자료 업데이트", body: "새 안건이 올라왔습니다. 가능하면 다음 액션을 검토하세요.", status: "검토 권장" },
@@ -158,14 +189,23 @@ function formatStealthAlert(mode, cfg, norm) {
   };
 
   if (mode === "weather") {
+    const station = marketStation(norm.market);
+    const observation = norm.reason ? norm.reason : "새 관측값 수신";
     return {
       ...common,
       title: copy.title,
-      body: copy.body + " 발표 " + norm.time,
+      headline: station + " · " + copy.headline,
+      body: copy.body,
+      kicker: copy.kicker,
+      caption: "발표 " + norm.time + " · " + station,
+      image: WEATHER_IMAGE,
+      imageAlt: "귀여운 날씨 뉴스 이미지",
+      notificationImage: WEATHER_IMAGE,
+      ticker: "관측 코멘트 · " + observation,
       fields: [
-        { label: "지역", value: marketStation(norm.market) },
-        { label: "체감", value: scaledIndex(norm.price) },
-        { label: "상태", value: copy.status },
+        { label: "지역", value: station },
+        { label: "체감 지수", value: scaledIndex(norm.price) },
+        { label: "날씨", value: copy.status },
       ],
     };
   }

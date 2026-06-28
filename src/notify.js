@@ -24,10 +24,17 @@ export function requestNotifyPermission() {
   }
 }
 
-export function sendNotification(title, body, tag) {
+export function sendNotification(title, body, tag, options = {}) {
   if (!notifySupported() || Notification.permission !== "granted") return;
   try {
-    new Notification(title, { body, tag, renotify: true });
+    new Notification(title, {
+      body,
+      tag,
+      renotify: true,
+      icon: options.icon,
+      image: options.image,
+      badge: options.badge,
+    });
   } catch {
     // Some platforms require a ServiceWorkerRegistration to show notifications;
     // ignore so the in-app feed still works.

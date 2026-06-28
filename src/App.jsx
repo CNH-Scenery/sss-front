@@ -104,7 +104,10 @@ class App extends React.Component {
     const feedItem={action:norm.action,color,text:'['+norm.market+'] '+norm.actionLabel+' · '+(norm.reason||'-')+' · '+norm.priceFmt+'원',time:norm.time};
     this.setState(s=>({ alerts:[feedItem,...s.alerts].slice(0,8), toasts:[...s.toasts,{id,...view}] }));
     if(cfg.sound) beep();
-    sendNotification(view.title, view.body, 'tt-alert');
+    sendNotification(view.title, view.body, 'tt-alert', {
+      icon: view.notificationImage,
+      image: view.notificationImage,
+    });
     if(cfg.autoDismissMs>0) setTimeout(()=>this.dismissToast(id), cfg.autoDismissMs);
   };
   sendTestAlert=()=>{

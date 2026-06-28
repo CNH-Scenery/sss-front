@@ -1,48 +1,100 @@
 import React from "react";
 import { css } from "../css.js";
 
+const WEATHER_IMAGE = "/weather-news-card.jpg";
+
+function ToastCloseButton({ onClose, id, light = false }) {
+  if (!onClose) return null;
+  return (
+    <button
+      onClick={() => onClose(id)}
+      className={light ? "tt-toast-close tt-toast-close-light" : "tt-toast-close"}
+      aria-label="닫기"
+    >
+      ×
+    </button>
+  );
+}
+
+function FieldGrid({ fields, weather = false }) {
+  if (!fields || fields.length === 0) return null;
+  return (
+    <div className={weather ? "tt-weather-metrics" : "tt-toast-fields"}>
+      {fields.map((f, i) => (
+        <div key={i} className={weather ? "tt-weather-metric" : "tt-toast-field"}>
+          <span>{f.label}</span>
+          <strong>{f.value}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function AlertToastCard({ toast, onClose, preview = false }) {
+  const t = toast || {};
+  const isWeather = t.mode === "weather";
+
+  if (isWeather) {
+    return (
+      <article
+        className={`tt-weather-toast${preview ? " tt-toast-preview" : ""}`}
+        style={{ "--tt-alert-color": t.color || "#4f8cff" }}
+      >
+        <div className="tt-weather-topline">
+          <span className="tt-weather-brand">SKY WEATHER NEWS</span>
+          <span className="tt-weather-live">LIVE</span>
+          <ToastCloseButton onClose={onClose} id={t.id} light />
+        </div>
+
+        <div className="tt-weather-main">
+          <div className="tt-weather-copy">
+            <div className="tt-weather-kicker">{t.kicker || "오늘의 관측 리포트"}</div>
+            <h2>{t.headline || t.title}</h2>
+            {t.body && <p>{t.body}</p>}
+            {t.caption && <div className="tt-weather-caption">{t.caption}</div>}
+          </div>
+          <div className="tt-weather-image-frame">
+            <img src={t.image || WEATHER_IMAGE} alt={t.imageAlt || "귀여운 날씨 뉴스 이미지"} />
+          </div>
+        </div>
+
+        <FieldGrid fields={t.fields} weather />
+
+        {t.ticker && (
+          <div className="tt-weather-ticker">
+            <span>속보</span>
+            <strong>{t.ticker}</strong>
+          </div>
+        )}
+      </article>
+    );
+  }
+
+  return (
+    <div
+      className={`tt-alert-card${preview ? " tt-toast-preview" : ""}`}
+      style={{
+        borderLeft: "4px solid " + t.color,
+      }}
+    >
+      <div style={css(`display:flex;align-items:flex-start;justify-content:space-between;gap:10px`)}>
+        <div style={{ fontWeight: 700, fontSize: "14px", color: t.color }}>{t.title}</div>
+        <ToastCloseButton onClose={onClose} id={t.id} />
+      </div>
+      {t.body && <div style={css(`font-size:12.5px;color:#c2cad4;line-height:1.5;margin-top:5px`)}>{t.body}</div>}
+      <FieldGrid fields={t.fields} />
+    </div>
+  );
+}
+
 // 화면 우상단에 쌓이는 인앱 알림 모달(토스트). 각 카드는 설정에 따라
 // 자동으로 닫히며, 닫기 버튼으로 즉시 제거할 수 있다.
 export default function AlertToasts({ toasts, onClose }) {
   if (!toasts || toasts.length === 0) return null;
   return (
-    <div style={css(`position:fixed;top:18px;right:18px;z-index:1000;display:flex;flex-direction:column;gap:10px;max-width:340px;font-family:'Pretendard',-apple-system,sans-serif`)}>
+    <div className="tt-toast-stack" aria-live="polite" aria-atomic="false">
       {toasts.map((t) => (
-        <div
-          key={t.id}
-          style={{
-            background: "#11151c",
-            border: "1px solid #1f2630",
-            borderLeft: "4px solid " + t.color,
-            borderRadius: "11px",
-            padding: "13px 14px",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
-            animation: "tt-in .25s ease",
-            color: "#e6edf3",
-          }}
-        >
-          <div style={css(`display:flex;align-items:flex-start;justify-content:space-between;gap:10px`)}>
-            <div style={{ fontWeight: 700, fontSize: "14px", color: t.color }}>{t.title}</div>
-            <button
-              onClick={() => onClose(t.id)}
-              style={css(`background:transparent;border:none;color:#5a6472;font-size:16px;line-height:1;cursor:pointer;padding:0 2px`)}
-              aria-label="닫기"
-            >
-              ×
-            </button>
-          </div>
-          {t.body && <div style={css(`font-size:12.5px;color:#c2cad4;line-height:1.5;margin-top:5px`)}>{t.body}</div>}
-          {t.fields && t.fields.length > 0 && (
-            <div style={css(`display:flex;flex-direction:column;gap:4px;margin-top:9px;padding-top:9px;border-top:1px solid #1a212c`)}>
-              {t.fields.map((f, i) => (
-                <div key={i} style={css(`display:flex;justify-content:space-between;gap:12px;font-size:11.5px`)}>
-                  <span style={css(`color:#7d8794`)}>{f.label}</span>
-                  <span style={css(`color:#dfe5ec;text-align:right;min-width:0`)}>{f.value}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        <AlertToastCard key={t.id} toast={t} onClose={onClose} />
       ))}
     </div>
   );

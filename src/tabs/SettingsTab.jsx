@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { css } from "../css.js";
 import { ALERT_MODES, PLACEHOLDERS, normalizePayload, formatAlert } from "../alerts/alertConfig.js";
+import { AlertToastCard } from "../components/AlertToasts.jsx";
 
 const card = `background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:18px;margin-bottom:16px`;
 const label = `font-size:12.5px;color:#9aa4b1;font-weight:600;margin-bottom:7px`;
@@ -53,7 +54,7 @@ export default function SettingsTab({ v }) {
         <div style={css(`color:#7d8794;font-size:13px;margin-top:5px`)}>백엔드 소켓이 보내는 알림을 인앱 모달 + 데스크톱 알림으로 어떻게 표시할지 정합니다.</div>
       </div>
 
-      <div style={css(`display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start`)}>
+      <div className="tt-settings-grid" style={css(`display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start`)}>
         <div style={css(`min-width:0`)}>
 
           <div style={css(card)}>
@@ -70,7 +71,7 @@ export default function SettingsTab({ v }) {
 
           <div style={css(card)}>
             <div style={css(`font-weight:700;font-size:14px;margin-bottom:12px`)}>알림 스타일 모드</div>
-            <div style={css(`display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px`)}>
+            <div className="tt-alert-mode-grid" style={css(`display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px`)}>
               {ALERT_MODES.map((mode) => {
                 const active = (cfg.alertMode || "expert") === mode.key;
                 return (
@@ -139,29 +140,16 @@ export default function SettingsTab({ v }) {
             </select>
           </div>
 
-          <div style={css(`display:flex;gap:10px;align-items:center`)}>
+          <div className="tt-settings-actions" style={css(`display:flex;gap:10px;align-items:center`)}>
             <button onClick={onSave} style={css(`border:none;border-radius:10px;padding:12px 20px;font-weight:700;font-size:14px;cursor:pointer;background:linear-gradient(90deg,#4f8cff,#22c55e);color:#06101f`)}>설정 저장</button>
             <button onClick={v.sendTestAlert} style={css(`background:#0e131b;border:1px solid #1f2630;color:#9aa4b1;border-radius:10px;padding:12px 18px;font-size:13.5px;cursor:pointer`)}>테스트 알림 띄우기</button>
             {saved && <span style={css(`font-size:12.5px;color:#22c55e`)}>저장됨 ✓</span>}
           </div>
         </div>
 
-        <div style={css(`position:sticky;top:0`)}>
+        <div className="tt-settings-preview" style={css(`position:sticky;top:0`)}>
           <div style={css(label + `;margin-bottom:10px`)}>미리보기</div>
-          <div style={{ background: "#11151c", border: "1px solid #1f2630", borderLeft: "4px solid " + preview.color, borderRadius: "11px", padding: "13px 14px", boxShadow: "0 10px 30px rgba(0,0,0,0.45)" }}>
-            <div style={{ fontWeight: 700, fontSize: "14px", color: preview.color }}>{preview.title}</div>
-            {preview.body && <div style={css(`font-size:12.5px;color:#c2cad4;line-height:1.5;margin-top:5px`)}>{preview.body}</div>}
-            {preview.fields.length > 0 && (
-              <div style={css(`display:flex;flex-direction:column;gap:4px;margin-top:9px;padding-top:9px;border-top:1px solid #1a212c`)}>
-                {preview.fields.map((f, i) => (
-                  <div key={i} style={css(`display:flex;justify-content:space-between;gap:12px;font-size:11.5px`)}>
-                    <span style={css(`color:#7d8794`)}>{f.label}</span>
-                    <span style={css(`color:#dfe5ec`)}>{f.value}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          <AlertToastCard toast={{ id: "preview", ...preview }} preview />
           <div style={css(`font-size:11px;color:#5a6472;margin-top:10px;line-height:1.5`)}>실제 데이터(BUY · KRW-BTC) 기준 예시입니다. 저장 후 백엔드 알림과 테스트 알림에 동일하게 적용됩니다.</div>
         </div>
       </div>
