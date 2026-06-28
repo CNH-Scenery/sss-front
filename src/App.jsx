@@ -16,6 +16,16 @@ import { createAlertSocket } from "./alerts/alertSocket.js";
 import { beep } from "./alerts/sound.js";
 import { generateTradingCode } from "./api/codegen.js";
 import { runBacktestApi } from "./api/backtest.js";
+import { API_BASE_URL } from "./api/base.js";
+
+// 백엔드 WebSocket URL 빌더. 배포(VITE_API_BASE_URL)면 http→ws/https→wss 로 변환,
+// 개발이면 현재 호스트(5173)로 붙어 Vite 프록시(ws:true)가 :8000 으로 전달한다.
+const backendWsUrl = (path) => {
+  const base = (API_BASE_URL || "").replace(/\/+$/, "");
+  if (base) return base.replace(/^http/, "ws") + path;
+  const loc = (typeof window !== "undefined") ? window.location : { protocol: "http:", host: "localhost:5173" };
+  return (loc.protocol === "https:" ? "wss:" : "ws:") + "//" + loc.host + path;
+};
 
 const dateOnly = (value) => String(value || "").slice(0, 10);
 const toLocalDateInput = (date) => {
@@ -67,15 +77,15 @@ class App extends React.Component {
       strategy:null, codifying:false, codifyError:'', versions:[], correctionDraft:'',
       backtest:null, backtesting:false, backtestError:'', backtestMarket:'KRW-BTC', backtestMarketDraft:'KRW-BTC', backtestStartDate:defaultBacktestRange.start, backtestEndDate:defaultBacktestRange.end, consistency:null,
       monitorMarket:'KRW-BTC', monitorMarketDraft:'KRW-BTC', monitorError:'', lastCandleTime:'', monitorCandles:[], monitorHistoryCandles:[], monitorHistoryLoading:false, monitorChartSpan:'1D', monitorMarkers:[],
-      price:null, prevPrice:null, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false,
+      price:null, prevPrice:null, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false, backendMonStatus:'off',
       alertConfig:loadConfig(), toasts:[], backendStatus:'off',
       chartRange:30,
       chartIndicators:{maBinance:true,maClassic:false,bb:true,vwap:false,volume:true,rsi:true,macd:false},
       chartTool:'cursor', chartDrawings:{}, pendingDrawing:null, chartViews:{} };
   }
   componentDidMount(){ this._unmounted=false; this._connectWs(); this._poll=setInterval(this._pollSignal,4000); this._pollSignal(); this._initBackend(); if(this.props.demoMode) this.fillDemo(); }
-  componentDidUpdate(prevProps, prevState){ if(!prevProps.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); if(!prevState?.strategy && this.state.strategy) this._loadMonitorHistory(); }
-  componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); if(this._tickerSock) this._tickerSock.close(); if(this._alertSock) this._alertSock.close(); }
+  componentDidUpdate(prevProps, prevState){ if(!prevProps.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); if(!prevState?.strategy && this.state.strategy) this._loadMonitorHistory(); const cid=this.state.strategy&&this.state.strategy.codeId; const pcid=prevState&&prevState.strategy&&prevState.strategy.codeId; if(cid&&cid!==pcid) this._connectBackendMonitor(); }
+  componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); if(this._tickerSock) this._tickerSock.close(); if(this._alertSock) this._alertSock.close(); this._disconnectBackendMonitor(); }
 
   // ── 백엔드 알림 소켓 + 통합 알림 발생기 ─────────────────────────
   _initBackend(){
@@ -85,6 +95,31 @@ class App extends React.Component {
     else this.setState({backendStatus:'off'});
   }
   saveAlertConfig=(cfg)=>{ const prevUrl=this.state.alertConfig.backendUrl; this.setState({alertConfig:cfg},()=>{ saveConfig(cfg); if(cfg.backendUrl!==prevUrl) this._initBackend(); }); };
+
+  // ── 백엔드 실시간 모니터 소켓 (생성된 동일 코드 decide() 를 서버가 주기 실행) ──
+  _connectBackendMonitor(){
+    this._disconnectBackendMonitor();
+    const st=this.state.strategy;
+    if(!st||!st.codeId) return;
+    const market=this.state.monitorMarket;
+    const url=backendWsUrl('/api/trading-code/'+st.codeId+'/stream?market='+encodeURIComponent(market)+'&timeframe=15m&interval=15');
+    this._lastBackendAction=null;
+    this.setState({backendMonStatus:'connecting'});
+    this._backendMonSock=createAlertSocket(url, this._onBackendDecision, (stt)=>{ if(!this._unmounted) this.setState({backendMonStatus:stt}); });
+  }
+  _disconnectBackendMonitor(){ if(this._backendMonSock){ this._backendMonSock.close(); this._backendMonSock=null; } }
+  _backendMonitorActive(){ return !!(this.state.strategy && this.state.strategy.codeId); }
+  _onBackendDecision=(msg)=>{
+    if(this._unmounted || !msg) return;
+    const action=String(msg.action||'HOLD').toUpperCase();
+    const reason=msg.reason||(action==='HOLD'?'관망':'');
+    this.setState(s=>({ signal:action, signalReason:reason, ...(Number.isFinite(msg.price)?{prevPrice:Number.isFinite(s.price)?s.price:msg.price,price:msg.price}:{}) }));
+    if((action==='BUY'||action==='SELL') && action!==this._lastBackendAction){
+      const price=Number.isFinite(msg.price)?msg.price:this.state.price;
+      this._emitAlert(createMonitorAlertPayload({action,market:msg.market||this.state.monitorMarket,price,reason,features:(msg.decision&&msg.decision.indicators)||{}}));
+    }
+    this._lastBackendAction=action;
+  };
   dismissToast=(id)=>this.setState(s=>({toasts:s.toasts.filter(t=>t.id!==id)}));
   _emitAlert=(payload)=>{
     const cfg=this.state.alertConfig;
@@ -187,23 +222,28 @@ class App extends React.Component {
       if(this._unmounted || market!==this.state.monitorMarket || c.length<20) return;
       const f=this._features(c);
       const price=Math.round(c[c.length-1].c);
-      const mon=this._mon;
-      const pnl=mon.holding ? (price-mon.entry)/mon.entry*100 : 0;
-      const action=this._strategyDecide(f,mon.holding,pnl);
-      const reason=this._signalReason(action,f,mon.holding);
       if(!this._openReal && !Number.isFinite(this._open)) this._open=price;
-      let fired=null;
-      if(action==='BUY' && !mon.holding){ mon.holding=true; mon.entry=price; fired={sig:'BUY',reason}; }
-      else if(action==='SELL' && mon.holding){ mon.holding=false; fired={sig:'SELL',reason}; }
+      // 백엔드 모니터(생성 코드)가 신호를 주면 로컬 판단은 건너뛰고 차트/가격만 갱신한다.
+      const useBackend=this._backendMonitorActive();
+      let signalPatch={};
+      if(!useBackend){
+        const mon=this._mon;
+        const pnl=mon.holding ? (price-mon.entry)/mon.entry*100 : 0;
+        const action=this._strategyDecide(f,mon.holding,pnl);
+        const reason=this._signalReason(action,f,mon.holding);
+        let fired=null;
+        if(action==='BUY' && !mon.holding){ mon.holding=true; mon.entry=price; fired={sig:'BUY',reason}; }
+        else if(action==='SELL' && mon.holding){ mon.holding=false; fired={sig:'SELL',reason}; }
+        signalPatch={signal:action,signalReason:reason};
+        if(fired) this._emitAlert(createMonitorAlertPayload({action:fired.sig,market,price,reason:fired.reason,features:f}));
+      }
       this.setState(s=>({
-        signal:action,
-        signalReason:reason,
+        ...signalPatch,
         monitorError:'',
         monitorCandles:c,
         lastCandleTime:c[c.length-1]?.t||'',
         ...(s.wsConnected?{}:{prevPrice:Number.isFinite(s.price)?s.price:price,price}),
       }));
-      if(fired) this._emitAlert(createMonitorAlertPayload({action:fired.sig,market,price,reason:fired.reason,features:f}));
     }catch(error){
       if(!this._unmounted && market===this.state.monitorMarket) {
         this.setState({monitorError:error?.message||'업비트 모니터링 데이터를 가져오지 못했습니다.'});
@@ -460,7 +500,7 @@ class App extends React.Component {
     const market=normalizeUpbitMarket(value);
     this._mon={holding:false,entry:0};
     if(market===this.state.monitorMarket){
-      this.setState({monitorMarketDraft:market,monitorError:''},()=>{ this._pollSignal(); if(!this.state.monitorHistoryCandles.length) this._loadMonitorHistory(); });
+      this.setState({monitorMarketDraft:market,monitorError:''},()=>{ this._pollSignal(); this._connectBackendMonitor(); if(!this.state.monitorHistoryCandles.length) this._loadMonitorHistory(); });
       return;
     }
     this._open=null;
@@ -481,7 +521,7 @@ class App extends React.Component {
       monitorHistoryCandles:[],
       monitorHistoryLoading:false,
       monitorMarkers:[],
-    },()=>{ this._connectWs(); this._pollSignal(); this._loadMonitorHistory(); });
+    },()=>{ this._connectWs(); this._pollSignal(); this._connectBackendMonitor(); this._loadMonitorHistory(); });
   };
   onWebhook=(e)=>this.setState({webhookDraft:e.target.value});
   enableNotifications=()=>{ requestNotifyPermission().then(p=>this.setState({notifPerm:p})); };
@@ -636,6 +676,8 @@ class App extends React.Component {
       consistencyPct:cons?cons.pct:0,consistencyTotal:cons?cons.total:0,consistencyWidth:cons?(cons.pct+'%'):'0%',
       hasMismatch:!!cons&&cons.mism.length>0,noMismatch:!!cons&&cons.mism.length===0,mismatchItems:mism,
       monNeedStrategy:!s.strategy,
+      backendMonStatus:s.backendMonStatus,backendMonLive:s.backendMonStatus==='connected',
+      monitorSource:(s.strategy&&s.strategy.codeId)?'백엔드 실시간(생성 코드 실행)':'로컬 판단',
       signalText:s.signal==='BUY'?'BUY · 매수 신호':s.signal==='SELL'?'SELL · 매도 신호':'HOLD · 관망',
       signalColor:s.signal==='BUY'?'#22c55e':s.signal==='SELL'?'#ef4444':'#f59e0b',
       signalReason:s.signalReason,
