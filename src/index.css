@@ -8,3 +8,101 @@ body { margin: 0; }
 @keyframes tt-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
 textarea, input { font-family: 'Pretendard', sans-serif; }
 textarea:focus, input:focus { outline: none; border-color: #4f8cff !important; }
+
+@media (max-width: 760px) {
+  .tt-app {
+    height: auto !important;
+    min-height: 100vh !important;
+    overflow: auto !important;
+  }
+  .tt-topbar {
+    height: auto !important;
+    align-items: flex-start !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 10px 14px !important;
+  }
+  .tt-topbar > div:first-child {
+    min-width: 0;
+    gap: 7px !important;
+  }
+  .tt-topbar > div:first-child > div:nth-child(2) {
+    font-size: 13px !important;
+    line-height: 1.05;
+    max-width: 76px;
+  }
+  .tt-topbar > div:first-child > div:nth-child(3),
+  .tt-topbar-status span:nth-child(2) {
+    display: none !important;
+  }
+  .tt-topbar-status {
+    width: 100% !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    font-size: 11px !important;
+  }
+  .tt-main {
+    flex-direction: column !important;
+    min-height: auto !important;
+  }
+  .tt-sidebar {
+    width: 100% !important;
+    flex: 0 0 auto !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid #1f2630 !important;
+    flex-direction: row !important;
+    overflow-x: auto !important;
+    padding: 8px !important;
+    gap: 6px !important;
+  }
+  .tt-sidebar > div:first-child,
+  .tt-sidebar > div:last-child {
+    display: none !important;
+  }
+  .tt-sidebar > div {
+    flex: 0 0 auto !important;
+  }
+  .tt-sidebar svg,
+  .tt-sidebar span {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .tt-scroll { overflow: visible !important; }
+  .tt-page {
+    max-width: none !important;
+    padding: 16px !important;
+  }
+  .tt-survey-head {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+  .tt-survey-progress {
+    min-width: 0 !important;
+    width: 100%;
+    text-align: left !important;
+  }
+  .tt-survey-progress > div:last-child {
+    width: 100% !important;
+  }
+  .tt-survey-grid,
+  .tt-survey-meta-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .tt-choice-row {
+    flex-direction: column !important;
+  }
+
+  .tt-choice-row > button {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 460px) {
+  .tt-page {
+    padding: 12px 10px 36px !important;
+  }
+  .tt-survey-grid > div {
+    padding: 12px !important;
+    border-radius: 10px !important;
+  }
+}
