@@ -64,8 +64,8 @@ export default function MonitorTab({ v }) {
                     <div style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:16px;margin-bottom:16px`)}>
                       <div style={css(`display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px`)}>
                         <div>
-                          <div style={css(`font-weight:700;font-size:14px`)}>실시간 1분봉 차트</div>
-                          <div style={css(`font-size:11.5px;color:#7d8794;margin-top:3px`)}>판단 기록 · 현재가 기준 결과</div>
+                          <div style={css(`font-weight:700;font-size:14px`)}>실시간 가격 차트</div>
+                          <div style={css(`font-size:11.5px;color:#7d8794;margin-top:3px`)}>{v.monitorChartHint}</div>
                         </div>
                         <div style={css(`display:flex;align-items:center;gap:8px;flex-wrap:wrap`)}>
                           <button onClick={v.markMonitorBuy} disabled={v.monitorMarkDisabled} style={css(v.monitorBuyBtnStyle)}>매수 기록</button>

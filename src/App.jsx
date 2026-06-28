@@ -9,7 +9,7 @@ import MonitorTab from "./tabs/MonitorTab.jsx";
 import SettingsTab from "./tabs/SettingsTab.jsx";
 import AlertToasts from "./components/AlertToasts.jsx";
 import { notifPermission, requestNotifyPermission, sendNotification } from "./notify.js";
-import { createUpbitTickerSocket, fetchUpbitDailyCandles, fetchUpbitMinuteCandles, normalizeUpbitMarket } from "./upbit.js";
+import { createUpbitTickerSocket, fetchUpbitDailyCandles, fetchUpbitMinuteCandles, fetchUpbitSecondCandles, normalizeUpbitMarket } from "./upbit.js";
 import { createMonitorAlertPayload, loadConfig, saveConfig, normalizePayload, formatAlert, pickColor } from "./alerts/alertConfig.js";
 import { createAlertSocket } from "./alerts/alertSocket.js";
 import { beep } from "./alerts/sound.js";
@@ -40,6 +40,13 @@ const chartNeedsTime = (candles) => {
   }
   return false;
 };
+const CHART_SPANS = [
+  { key: "1D", label: "1D", minutes: 1440, candleLabel: "5초봉", source: "second", bucketSeconds: 5 },
+  { key: "1W", label: "1W", minutes: 10080, candleLabel: "1분봉", source: "minute", unit: 1 },
+  { key: "1M", label: "1M", minutes: 43200, candleLabel: "10분봉", source: "minute", unit: 10 },
+  { key: "1Y", label: "1Y", minutes: 525600, candleLabel: "일봉", source: "daily" },
+];
+const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
 class App extends React.Component {
   constructor(props){
     super(props);
@@ -49,21 +56,22 @@ class App extends React.Component {
     const defaultBacktestRange=createDefaultBacktestRange();
     this._codeParams={rsiBuy:42,volBuy:1.05,rsiSell:60,pnlTake:10,pnlStop:-6,extra:[]};
     this._backtestCandleCache={};
-    this._open=92418000; this._openReal=false;
+    this._monitorHistoryCache={};
+    this._open=null; this._openReal=false;
     this._mon={holding:false,entry:0};  // 실시간 모니터링용 가상 포지션
     this.surveys=this._buildSurveys();
     this.state={ screen:'survey', surveyIndex:0, responses:{}, draftAction:null, draftReason:'',
       strategy:null, codifying:false, versions:[], correctionDraft:'',
       backtest:null, backtesting:false, backtestError:'', backtestMarket:'KRW-BTC', backtestMarketDraft:'KRW-BTC', backtestStartDate:defaultBacktestRange.start, backtestEndDate:defaultBacktestRange.end, consistency:null,
-      monitorMarket:'KRW-BTC', monitorMarketDraft:'KRW-BTC', monitorError:'', lastCandleTime:'', monitorCandles:[], monitorMarkers:[],
-      price:92418000, prevPrice:92418000, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false,
+      monitorMarket:'KRW-BTC', monitorMarketDraft:'KRW-BTC', monitorError:'', lastCandleTime:'', monitorCandles:[], monitorHistoryCandles:[], monitorHistoryLoading:false, monitorChartSpan:'1D', monitorMarkers:[],
+      price:null, prevPrice:null, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false,
       alertConfig:loadConfig(), toasts:[], backendStatus:'off',
       chartRange:30,
       chartIndicators:{maBinance:true,maClassic:false,bb:true,vwap:false,volume:true,rsi:true,macd:false},
-      chartTool:'cursor', chartDrawings:{}, pendingDrawing:null };
+      chartTool:'cursor', chartDrawings:{}, pendingDrawing:null, chartViews:{} };
   }
   componentDidMount(){ this._unmounted=false; this._connectWs(); this._poll=setInterval(this._pollSignal,4000); this._pollSignal(); this._initBackend(); if(this.props.demoMode) this.fillDemo(); }
-  componentDidUpdate(prevProps){ if(!prevProps.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); }
+  componentDidUpdate(prevProps, prevState){ if(!prevProps.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); if(!prevState?.strategy && this.state.strategy) this._loadMonitorHistory(); }
   componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); if(this._tickerSock) this._tickerSock.close(); if(this._alertSock) this._alertSock.close(); }
 
   // ── 백엔드 알림 소켓 + 통합 알림 발생기 ─────────────────────────
@@ -87,7 +95,11 @@ class App extends React.Component {
     sendNotification(view.title, view.body, 'tt-alert');
     if(cfg.autoDismissMs>0) setTimeout(()=>this.dismissToast(id), cfg.autoDismissMs);
   };
-  sendTestAlert=()=>this._emitAlert(createMonitorAlertPayload({action:'BUY',market:this.state.monitorMarket,price:this.state.price,reason:'[테스트] 전략 매수 조건 예시',features:{rsi14:31,vol_ratio:1.7}}));
+  sendTestAlert=()=>{
+    const last=this.state.monitorCandles[this.state.monitorCandles.length-1];
+    const price=Number.isFinite(this.state.price)?this.state.price:Math.round(last?.c||0);
+    this._emitAlert(createMonitorAlertPayload({action:'BUY',market:this.state.monitorMarket,price,reason:'[테스트] 전략 매수 조건 예시',features:{rsi14:31,vol_ratio:1.7}}));
+  };
 
   // ── 업비트 실시간 시세 (WebSocket) ──────────────────────────────
   _connectWs(){
@@ -99,11 +111,64 @@ class App extends React.Component {
         if(this._unmounted || code!==this.state.monitorMarket) return;
         const np=Math.round(price);
         if(!this._openReal){ this._open=np; this._openReal=true; }
-        this.setState(s=>({prevPrice:s.price, price:np, monitorError:''}));
+        this.setState(s=>({prevPrice:Number.isFinite(s.price)?s.price:np, price:np, monitorError:''}));
       },
       onError:()=>{ if(!this._unmounted) this.setState({wsConnected:false}); },
     });
   }
+
+  _chartSpan(spanKey){
+    return CHART_SPANS.find(x=>x.key===spanKey)||CHART_SPANS[0];
+  }
+  _monitorChartKey(market=this.state.monitorMarket,spanKey=this.state.monitorChartSpan){
+    return 'monitor-'+market+'-'+spanKey;
+  }
+  _monitorSpanCount(span){
+    if(span.source==='daily') return Math.ceil(span.minutes/1440);
+    if(span.source==='minute') return Math.ceil(span.minutes/(span.unit||1));
+    return Math.ceil(span.minutes*60/(span.bucketSeconds||1));
+  }
+  _fetchMonitorSpanCandles(market,span){
+    if(span.source==='daily') return fetchUpbitDailyCandles(market,this._monitorSpanCount(span));
+    if(span.source==='minute') return fetchUpbitMinuteCandles(market,span.unit||1,this._monitorSpanCount(span));
+    return fetchUpbitSecondCandles(market,span.minutes*60,span.bucketSeconds||1);
+  }
+  _setMonitorChartCandles(span,market,candles){
+    const key=this._monitorChartKey(market,span.key);
+    const range=Math.max(1,candles.length);
+    this.setState(s=>({
+      monitorChartSpan:span.key,
+      monitorHistoryCandles:candles,
+      monitorHistoryLoading:false,
+      monitorError:'',
+      chartViews:{...s.chartViews,[key]:{range,endIndex:range-1}},
+    }));
+  }
+  _selectMonitorChartSpan=(spanKey)=>{
+    this._loadMonitorHistory(spanKey);
+  };
+  _loadMonitorHistory=async(spanKey=this.state.monitorChartSpan)=>{
+    if(!this.state.strategy) return;
+    const span=this._chartSpan(spanKey);
+    const market=this.state.monitorMarket;
+    const requestId=this._monitorHistoryRequest=(this._monitorHistoryRequest||0)+1;
+    const cacheKey=market+':'+span.key;
+    const cached=this._monitorHistoryCache[cacheKey];
+    if(cached?.length){
+      this._setMonitorChartCandles(span,market,cached);
+      return;
+    }
+    this.setState({monitorChartSpan:span.key,monitorHistoryCandles:[],monitorHistoryLoading:true,monitorError:''});
+    try{
+      const candles=await this._fetchMonitorSpanCandles(market,span);
+      if(this._unmounted || requestId!==this._monitorHistoryRequest || market!==this.state.monitorMarket) return;
+      this._monitorHistoryCache[cacheKey]=candles;
+      this._setMonitorChartCandles(span,market,candles);
+    }catch(error){
+      if(this._unmounted || requestId!==this._monitorHistoryRequest || market!==this.state.monitorMarket) return;
+      this.setState({monitorHistoryLoading:false,monitorError:error?.message||'Monitoring history request failed.'});
+    }
+  };
 
   // ── 실시간 지표·신호 (REST 캔들) ─────────────────────────────────
   _signalReason(action,f,holding){
@@ -123,6 +188,7 @@ class App extends React.Component {
       const pnl=mon.holding ? (price-mon.entry)/mon.entry*100 : 0;
       const action=this._strategyDecide(f,mon.holding,pnl);
       const reason=this._signalReason(action,f,mon.holding);
+      if(!this._openReal && !Number.isFinite(this._open)) this._open=price;
       let fired=null;
       if(action==='BUY' && !mon.holding){ mon.holding=true; mon.entry=price; fired={sig:'BUY',reason}; }
       else if(action==='SELL' && mon.holding){ mon.holding=false; fired={sig:'SELL',reason}; }
@@ -132,7 +198,7 @@ class App extends React.Component {
         monitorError:'',
         monitorCandles:c,
         lastCandleTime:c[c.length-1]?.t||'',
-        ...(s.wsConnected?{}:{prevPrice:s.price,price}),
+        ...(s.wsConnected?{}:{prevPrice:Number.isFinite(s.price)?s.price:price,price}),
       }));
       if(fired) this._emitAlert(createMonitorAlertPayload({action:fired.sig,market,price,reason:fired.reason,features:f}));
     }catch(error){
@@ -213,12 +279,90 @@ class App extends React.Component {
   _highlight(code){ const R=React.createElement; const kw=new Set(['def','return','if','elif','else','and','or','not','in','None','True','False','import','for','while','is']); const fn=new Set(['decide','features','position','dict']); const lines=code.split('\n'); const out=lines.map((line,li)=>{ let parts; if(line.trim().indexOf('#')===0){ parts=[R('span',{key:'c',style:{color:'#8b949e'}},line)]; } else { parts=[]; const re=/("(?:[^"\\]|\\.)*"|#.*$|\b\d+\.?\d*\b|[A-Za-z_]\w*|\s+|[^\sA-Za-z0-9_"]+)/g; let m,k=0; while((m=re.exec(line))){ const t=m[0]; let col=null; if(t[0]==='"')col='#a5d6ff'; else if(t[0]==='#')col='#8b949e'; else if(/^\d/.test(t))col='#79c0ff'; else if(kw.has(t))col='#ff7b72'; else if(fn.has(t))col='#d2a8ff'; parts.push(col?R('span',{key:k++,style:{color:col}},t):t); } } return R('div',{key:li,style:{minHeight:'1.5em',whiteSpace:'pre'}},parts.length?parts:'\u00a0'); }); return R('pre',{style:{margin:0,fontFamily:"'JetBrains Mono', monospace",fontSize:'12.5px',lineHeight:1.5,color:'#e6edf3'}},out); }
   _kfmt(v){ if(v>=1e6) return (v/1e4).toLocaleString(undefined,{maximumFractionDigits:0})+'만'; if(v>=1000) return Math.round(v).toLocaleString(); return v.toFixed(1); }
   _axisDateLabel(value,intraday=false){ const text=String(value||''); if(!text)return ''; if(/^\d{4}-\d{2}-\d{2}/.test(text)){ const md=text.slice(5,10).replace('-','/'),hm=text.slice(11,16); return intraday&&hm?md+' '+hm:md; } return text; }
+  _chartIntervalMinutes(c){
+    const diffs=[];
+    for(let i=1;i<c.length;i++){
+      const prev=parseChartTime(c[i-1]?.t),cur=parseChartTime(c[i]?.t);
+      if(prev&&cur){
+        const diff=Math.abs(cur-prev)/60000;
+        if(Number.isFinite(diff)&&diff>0) diffs.push(diff);
+      }
+      if(diffs.length>=12) break;
+    }
+    if(!diffs.length) return 1440;
+    diffs.sort((a,b)=>a-b);
+    return diffs[Math.floor(diffs.length/2)]||1440;
+  }
+  _chartSpanCount(c,spanKey){
+    const span=CHART_SPANS.find(x=>x.key===spanKey);
+    if(!span) return c.length;
+    const unit=this._chartIntervalMinutes(c);
+    return Math.max(1,Math.ceil(span.minutes/unit));
+  }
+  _resolveChartView(c,key,defaultRange){
+    const count=c.length;
+    const saved=key?this.state.chartViews[key]:null;
+    const desired=Math.floor(saved?.range||defaultRange||count);
+    const range=clampNumber(Math.max(1,desired),1,Math.max(1,count));
+    let end=Number.isFinite(saved?.endIndex)?Math.round(saved.endIndex):count-1;
+    end=clampNumber(end,range-1,count-1);
+    const start=Math.max(0,end-range+1);
+    return {key,range,endIndex:end,startIndex:start,count};
+  }
+  _setChartView=(key,range,endIndex)=>{
+    if(!key) return;
+    this.setState(s=>({chartViews:{...s.chartViews,[key]:{range,endIndex}},pendingDrawing:null}));
+  };
+  _pageChartView=(key,view,dir)=>{
+    const nextEnd=clampNumber(view.endIndex+dir*view.range,view.range-1,view.count-1);
+    this._setChartView(key,view.range,nextEnd);
+  };
+  _zoomChartView=(key,view,ratio,factor)=>{
+    const nextRange=clampNumber(Math.round(view.range*factor),1,view.count);
+    if(nextRange===view.range) return;
+    const focus=view.startIndex+ratio*Math.max(0,view.range-1);
+    const nextStart=focus-ratio*Math.max(0,nextRange-1);
+    const nextEnd=clampNumber(Math.round(nextStart+nextRange-1),nextRange-1,view.count-1);
+    this._setChartView(key,nextRange,nextEnd);
+  };
+  _chartButtonStyle(active=false,disabled=false,tone='#4f8cff'){
+    return {display:'inline-flex',alignItems:'center',justifyContent:'center',minWidth:34,height:26,padding:'0 8px',borderRadius:7,border:'1px solid '+(active?tone:'#1f2630'),background:active?tone+'22':'#0e131b',color:disabled?'#4b5563':(active?'#e6edf3':'#9aa4b1'),fontSize:11,fontWeight:800,cursor:disabled?'not-allowed':'pointer',whiteSpace:'nowrap'};
+  }
+  _chartWithControls(c,o){
+    o=o||{};
+    const R=React.createElement,key=o.chartViewKey||o.chartKey||o.clipId||'chart';
+    const defaultRange=Math.min(c.length,o.defaultRange||o.range||c.length);
+    const view=this._resolveChartView(c,key,defaultRange);
+    const intraday=o.intraday??chartNeedsTime(c);
+    const startLabel=this._axisDateLabel(c[view.startIndex]?.t,intraday);
+    const endLabel=this._axisDateLabel(c[view.endIndex]?.t,intraday);
+    const spanButtons=CHART_SPANS.map(span=>{
+      const rawSpanRange=this._chartSpanCount(c,span.key);
+      const spanRange=Math.min(c.length,rawSpanRange);
+      const active=o.activeSpanKey?o.activeSpanKey===span.key:(view.range===spanRange&&rawSpanRange<=c.length);
+      const onClick=o.onSpanSelect?()=>o.onSpanSelect(span.key):()=>this._setChartView(key,spanRange,c.length-1);
+      return R('button',{key:span.key,type:'button',onClick,style:this._chartButtonStyle(active,false,'#4f8cff'),title:span.label+' · '+span.candleLabel},span.label);
+    });
+    const canPast=view.startIndex>0,canNewer=view.endIndex<c.length-1;
+    return R('div',{style:{display:'grid',gap:8}},
+      R('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8,flexWrap:'wrap'}},
+        R('div',{style:{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}},
+          R('button',{type:'button',disabled:!canPast,onClick:()=>this._pageChartView(key,view,-1),style:this._chartButtonStyle(false,!canPast,'#f0b90b'),title:'past page'},'<'),
+          R('button',{type:'button',disabled:!canNewer,onClick:()=>this._pageChartView(key,view,1),style:this._chartButtonStyle(false,!canNewer,'#f0b90b'),title:'newer page'},'>'),
+          R('button',{type:'button',disabled:!canNewer,onClick:()=>this._setChartView(key,view.range,c.length-1),style:this._chartButtonStyle(false,!canNewer,'#22c55e'),title:'latest'},'NOW')
+        ),
+        R('div',{style:{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}},spanButtons),
+        R('div',{style:{fontFamily:"'JetBrains Mono', monospace",fontSize:11,color:'#6b7280',whiteSpace:'nowrap'}},startLabel+' - '+endLabel+' / '+view.range)
+      ),
+      this._candleChart(c,{...o,range:view.range,endIndex:view.endIndex,chartViewKey:key,chartView:view})
+    );
+  }
   _candleChart(c,o){
     o=o||{}; const R=React.createElement; const ind=o.indicators||{}; const W=920,H=o.height||330,pL=12,pR=66,axisH=20,gap=8;
     const showVol=!!ind.volume,showRsi=!!ind.rsi,showMacd=!!ind.macd;
     const lowerH=(showVol?54:0)+(showRsi?58:0)+(showMacd?64:0)+([showVol,showRsi,showMacd].filter(Boolean).length?gap*([showVol,showRsi,showMacd].filter(Boolean).length-1):0);
     const priceTop=30,priceBottom=H-axisH-lowerH,priceH=Math.max(120,priceBottom-priceTop),pw=W-pL-pR;
-    const range=Math.min(o.range||c.length,c.length),start=c.length-range,visible=c.slice(start),n=visible.length,cw=pw/(n||1),cl=c.map(x=>x.c);
+    const range=Math.min(o.range||c.length,c.length),end=Number.isFinite(o.endIndex)?Math.max(range-1,Math.min(c.length-1,Math.round(o.endIndex))):c.length-1,start=Math.max(0,end-range+1),visible=c.slice(start,end+1),n=visible.length,cw=pw/(n||1),cl=c.map(x=>x.c);
     const sma=p=>{ const out=Array(c.length).fill(null); let sum=0; for(let i=0;i<c.length;i++){ sum+=cl[i]; if(i>=p)sum-=cl[i-p]; if(i>=p-1)out[i]=sum/p; } return out; };
     const ema=p=>{ const out=[]; const k=2/(p+1); let v=cl[0]; for(let i=0;i<c.length;i++){ v=i===0?cl[i]:cl[i]*k+v*(1-k); out.push(v); } return out; };
     const boll=(p,m)=>{ const mid=sma(p),up=Array(c.length).fill(null),lo=Array(c.length).fill(null); for(let i=p-1;i<c.length;i++){ const a=cl.slice(i-p+1,i+1),avg=mid[i],sd=Math.sqrt(a.reduce((s,v)=>s+(v-avg)*(v-avg),0)/p); up[i]=avg+m*sd; lo[i]=avg-m*sd; } return {mid,up,lo}; };
@@ -259,7 +403,8 @@ class App extends React.Component {
     const yy=y(last.c); e.push(R('line',{key:'lastline',x1:pL,x2:pL+pw,y1:yy,y2:yy,stroke:lastColor,strokeWidth:1,strokeDasharray:'5 4',opacity:.75})); e.push(R('rect',{key:'lastbox',x:pL+pw+5,y:yy-9,width:58,height:18,rx:4,fill:lastColor+'22',stroke:lastColor,strokeWidth:.8})); e.push(R('text',{key:'lasttxt',x:pL+pw+10,y:yy+3,fill:lastColor,fontSize:9,fontFamily:'JetBrains Mono, monospace',fontWeight:700},this._kfmt(last.c)));
     (o.drawings||[]).forEach((d,i)=>{ if(d.type==='hline'){ const py=y(d.price); e.push(R('line',{key:'dh'+i,x1:pL,x2:pL+pw,y1:py,y2:py,stroke:d.color,strokeWidth:1.6,strokeDasharray:'6 5',clipPath:'url(#'+clipId+')'})); e.push(R('text',{key:'dht'+i,x:pL+pw-2,y:py-5,fill:d.color,fontSize:9,fontFamily:'JetBrains Mono, monospace',textAnchor:'end'},this._kfmt(d.price))); } else if(d.type==='trend'){ e.push(R('line',{key:'dt'+i,x1:xAbs(d.a.i),y1:y(d.a.price),x2:xAbs(d.b.i),y2:y(d.b.price),stroke:d.color,strokeWidth:2,strokeLinecap:'round',clipPath:'url(#'+clipId+')'})); } });
     if(o.pendingDrawing&&o.pendingDrawing.survey===o.surveyIndex){ const pi=o.pendingDrawing.i-start; if(pi>=0&&pi<n)e.push(R('circle',{key:'pending',cx:x(pi),cy:y(o.pendingDrawing.price),r:4,fill:'#f0b90b',stroke:'#0a0e14',strokeWidth:1.5})); }
-    (o.markers||[]).forEach((m,k)=>{ const idx=Number.isFinite(m.i)?m.i:(m.t?c.findIndex(d=>d.t===m.t):-1),li=idx-start; if(li<0||li>=n||!c[idx])return; const buy=m.type==='BUY',col=buy?'#22c55e':'#ef4444',dir=buy?1:-1,xx=x(li),base=Number.isFinite(m.price)?m.price:(buy?c[idx].l:c[idx].h),py=Math.max(priceTop+12,Math.min(priceBottom-12,buy?y(base)+13:y(base)-13)); e.push(R('path',{key:'m'+k,d:'M '+xx+' '+(py-6*dir)+' L '+(xx-5)+' '+(py+2*dir)+' L '+(xx+5)+' '+(py+2*dir)+' Z',fill:col,stroke:'#0a0e14',strokeWidth:0.8})); if(m.label)e.push(R('text',{key:'ml'+k,x:xx,y:py+(buy?16:-10),fill:col,fontSize:9,fontFamily:'JetBrains Mono, monospace',fontWeight:800,textAnchor:'middle'},m.label)); });
+    const markerIndex=(m)=>{ if(Number.isFinite(m.i)) return m.i; if(!m.t)return -1; const exact=c.findIndex(d=>d.t===m.t); if(exact>=0)return exact; const mt=parseChartTime(m.t); if(!mt)return -1; let best=-1,dist=Infinity; c.forEach((d,i)=>{ const dt=parseChartTime(d.t); if(!dt)return; const gap=Math.abs(dt-mt); if(gap<dist){ dist=gap; best=i; } }); return best; };
+    (o.markers||[]).forEach((m,k)=>{ const idx=markerIndex(m),li=idx-start; if(li<0||li>=n||!c[idx])return; const buy=m.type==='BUY',col=buy?'#22c55e':'#ef4444',dir=buy?1:-1,xx=x(li),base=Number.isFinite(m.price)?m.price:(buy?c[idx].l:c[idx].h),py=Math.max(priceTop+12,Math.min(priceBottom-12,buy?y(base)+13:y(base)-13)); e.push(R('path',{key:'m'+k,d:'M '+xx+' '+(py-6*dir)+' L '+(xx-5)+' '+(py+2*dir)+' L '+(xx+5)+' '+(py+2*dir)+' Z',fill:col,stroke:'#0a0e14',strokeWidth:0.8})); if(m.label)e.push(R('text',{key:'ml'+k,x:xx,y:py+(buy?16:-10),fill:col,fontSize:9,fontFamily:'JetBrains Mono, monospace',fontWeight:800,textAnchor:'middle'},m.label)); });
     let panelTop=priceBottom+gap;
     const panel=(key,h,label)=>{ const top=panelTop; panelTop+=h+gap; e.push(R('line',{key:key+'sep',x1:pL,x2:pL+pw,y1:top,y2:top,stroke:'#1f2630'})); e.push(R('text',{key:key+'lab',x:pL,y:top+12,fill:'#7d8794',fontSize:9,fontFamily:'JetBrains Mono, monospace',fontWeight:700},label)); return {top,h,bottom:top+h}; };
     if(showVol){ const p=panel('vol',54,'VOL'),mxv=Math.max.apply(null,visible.map(d=>d.v))||1; visible.forEach((d,i)=>{ const bh=d.v/mxv*(p.h-16),col=d.c>=d.o?'#22c55e66':'#ef444466'; e.push(R('rect',{key:'vol'+i,x:x(i)-Math.max(1,cw*.28),y:p.bottom-bh,width:Math.max(1,cw*.56),height:bh,fill:col})); }); e.push(R('text',{key:'volmax',x:pL+pw+7,y:p.top+12,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace'},this._kfmt(mxv))); }
@@ -269,7 +414,8 @@ class App extends React.Component {
     for(let g=0;g<=4;g++){ const li=Math.min(n-1,Math.round((n-1)*g/4)),xx=x(li),label=this._axisDateLabel(visible[li]?.t,intraday); e.push(R('text',{key:'xl'+g,x:xx,y:H-6,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace',textAnchor:'middle'},label)); }
     const drawMode=!!o.onChartClick&&o.tool&&o.tool!=='cursor';
     const click=drawMode?(ev)=>{ const r=ev.currentTarget.getBoundingClientRect(),sx=(ev.clientX-r.left)/r.width*W,sy=(ev.clientY-r.top)/r.height*H; if(sx<pL||sx>pL+pw||sy<priceTop||sy>priceBottom)return; const li=Math.max(0,Math.min(n-1,Math.round((sx-pL)/cw-.5))),py=Math.max(priceTop,Math.min(priceBottom,sy)),price=mn+(1-(py-priceTop)/priceH)*rg; o.onChartClick({i:start+li,price}); }:undefined;
-    return R('svg',{key:o.chartKey||undefined,viewBox:'0 0 '+W+' '+H,onClick:click,style:{width:'100%',height:'auto',display:'block',cursor:drawMode?'crosshair':'default',touchAction:'manipulation',userSelect:'none'}},e);
+    const wheel=o.chartViewKey?(ev)=>{ ev.preventDefault(); ev.stopPropagation(); const r=ev.currentTarget.getBoundingClientRect(),sx=(ev.clientX-r.left)/r.width*W,ratio=clampNumber((sx-pL)/pw,0,1),factor=ev.deltaY<0?0.72:1.38; this._zoomChartView(o.chartViewKey,o.chartView||{range,endIndex:end,startIndex:start,count:c.length},ratio,factor); }:undefined;
+    return R('svg',{key:o.chartKey||undefined,viewBox:'0 0 '+W+' '+H,onClick:click,onWheel:wheel,style:{width:'100%',height:'auto',display:'block',cursor:drawMode?'crosshair':'default',touchAction:'manipulation',userSelect:'none'}},e);
   }
   _equityChart(st,bh,A,dates=[],chartKey=''){ const R=React.createElement; const W=820,H=230,pT=12,pB=30,pL=10,pR=46; const all=st.concat(bh),mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),rg=(mx-mn)||1; const pw=W-pL-pR,ph=H-pT-pB,n=st.length; const x=i=>pL+pw*(i/(n-1||1)); const y=v=>pT+(1-(v-mn)/rg)*ph; const path=a=>a.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' '); const e=[]; for(let g=0;g<=3;g++){ const val=mn+rg*g/3,yy=y(val); e.push(R('line',{key:'g'+g,x1:pL,x2:pL+pw,y1:yy,y2:yy,stroke:'#1a212c'})); e.push(R('text',{key:'t'+g,x:pL+pw+6,y:yy+3,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace'},((val-1)*100).toFixed(0)+'%')); } const yb=y(1); e.push(R('line',{key:'b',x1:pL,x2:pL+pw,y1:yb,y2:yb,stroke:'#2a3340',strokeDasharray:'3 3'})); e.push(R('path',{key:'bh',d:path(bh),fill:'none',stroke:'#5a6472',strokeWidth:1.5})); e.push(R('path',{key:'ar',d:path(st)+' L '+x(n-1).toFixed(1)+' '+(pT+ph).toFixed(1)+' L '+x(0).toFixed(1)+' '+(pT+ph).toFixed(1)+' Z',fill:A+'1f'})); e.push(R('path',{key:'st',d:path(st),fill:'none',stroke:A,strokeWidth:2})); for(let g=0;g<=4;g++){ const i=Math.min(n-1,Math.round((n-1)*g/4)),label=this._axisDateLabel(dates[i]?.t||dates[i],false); e.push(R('text',{key:'xl'+g,x:x(i),y:H-7,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace',textAnchor:'middle'},label)); } return R('svg',{key:chartKey||undefined,viewBox:'0 0 '+W+' '+H,style:{width:'100%',height:'auto',display:'block'}},e); }
   _now(){ return new Date().toTimeString().slice(0,8); }
@@ -284,7 +430,7 @@ class App extends React.Component {
   _setSurvey=(i)=>{ i=Math.max(0,Math.min(9,i)); const r=this.state.responses[i]; this.setState({surveyIndex:i,draftAction:r?r.action:null,draftReason:r?r.reason:'',pendingDrawing:null}); };
   goPrev=()=>this._setSurvey(this.state.surveyIndex-1);
   goNext=()=>this._setSurvey(this.state.surveyIndex+1);
-  setChartRange=(range)=>this.setState({chartRange:range,pendingDrawing:null});
+  setChartRange=(range)=>this.setState(s=>({chartRange:range,pendingDrawing:null,chartViews:{...s.chartViews,['survey-'+s.surveyIndex]:{range,endIndex:this.surveys[s.surveyIndex].candles.length-1}}}));
   toggleChartIndicator=(key)=>this.setState(s=>({chartIndicators:{...s.chartIndicators,[key]:!s.chartIndicators[key]}}));
   setChartTool=(tool)=>this.setState(s=>({chartTool:s.chartTool===tool?'cursor':tool,pendingDrawing:null}));
   clearChartDrawings=()=>this.setState(s=>({chartDrawings:{...s.chartDrawings,[s.surveyIndex]:[]},pendingDrawing:null}));
@@ -308,23 +454,29 @@ class App extends React.Component {
   setMonitorMarket=(value)=>{
     const market=normalizeUpbitMarket(value);
     this._mon={holding:false,entry:0};
-    this._openReal=false;
     if(market===this.state.monitorMarket){
-      this.setState({monitorMarketDraft:market,monitorError:''},()=>this._pollSignal());
+      this.setState({monitorMarketDraft:market,monitorError:''},()=>{ this._pollSignal(); if(!this.state.monitorHistoryCandles.length) this._loadMonitorHistory(); });
       return;
     }
+    this._open=null;
+    this._openReal=false;
+    this._monitorHistoryCache={};
     this.setState({
       monitorMarket:market,
       monitorMarketDraft:market,
       wsConnected:false,
+      price:null,
+      prevPrice:null,
       signal:'HOLD',
       signalReason:'새 종목 데이터 수신 대기',
       alerts:[],
       monitorError:'',
       lastCandleTime:'',
       monitorCandles:[],
+      monitorHistoryCandles:[],
+      monitorHistoryLoading:false,
       monitorMarkers:[],
-    },()=>{ this._connectWs(); this._pollSignal(); });
+    },()=>{ this._connectWs(); this._pollSignal(); this._loadMonitorHistory(); });
   };
   onWebhook=(e)=>this.setState({webhookDraft:e.target.value});
   enableNotifications=()=>{ requestNotifyPermission().then(p=>this.setState({notifPerm:p})); };
@@ -342,6 +494,12 @@ class App extends React.Component {
 
   renderVals(){
     const s=this.state; const A=this.props.accent||'#4f8cff';
+    const livePrice=Number.isFinite(s.price)?s.price:null;
+    const prevLivePrice=Number.isFinite(s.prevPrice)?s.prevPrice:livePrice;
+    const openPrice=Number.isFinite(this._open)?this._open:null;
+    const hasLivePrice=livePrice!==null;
+    const topPriceColor=!hasLivePrice?'#9aa4b1':(livePrice>=prevLivePrice?'#22c55e':'#ef4444');
+    const priceChangePct=(hasLivePrice&&openPrice)?(((livePrice-openPrice)/openPrice*100)>=0?'+':'')+((livePrice-openPrice)/openPrice*100).toFixed(2)+'%':'-';
     const actColor=a=>a==='BUY'?'#22c55e':a==='SELL'?'#ef4444':'#f59e0b';
     const cur=this.surveys[s.surveyIndex]; const f=cur.features; const rangeUnit=cur.tf==='일'?'일':'봉';
     const navBase='display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:500;transition:all .12s;';
@@ -388,7 +546,15 @@ class App extends React.Component {
     const bt=s.backtest; const cons=s.consistency;
     const backtestRangeText=(s.backtestStartDate||'-')+' ~ '+(s.backtestEndDate||'-');
     const backtestMetaText=bt?.summary ? (bt.summary.market+' · 수집 '+dateOnly(bt.summary.dataFrom)+' ~ '+dateOnly(bt.summary.dataTo)+' ('+bt.summary.fullCandleCount+'개) · 적용 '+dateOnly(bt.summary.from)+' ~ '+dateOnly(bt.summary.to)+' ('+bt.summary.rangeCandleCount+'개 일봉)') : (backtestMarket+' · 최근 1년 수집 후 '+backtestRangeText+' 적용');
-    const monitorMarkerItems=s.monitorMarkers.slice().reverse().map(m=>{ const pnl=m.price?((m.type==='BUY'?(s.price-m.price):(m.price-s.price))/m.price*100):0; return {id:m.id,type:m.type,label:m.type==='BUY'?'매수':'매도',color:m.type==='BUY'?'#22c55e':'#ef4444',price:m.price.toLocaleString(),time:m.time,date:this._axisDateLabel(m.t,true),pnlText:(pnl>=0?'+':'')+pnl.toFixed(2)+'%',pnlColor:pnl>=0?'#22c55e':'#ef4444'}; });
+    const monitorMarkerItems=s.monitorMarkers.slice().reverse().map(m=>{ const hasPnl=!!m.price&&hasLivePrice; const pnl=hasPnl?((m.type==='BUY'?(livePrice-m.price):(m.price-livePrice))/m.price*100):0; return {id:m.id,type:m.type,label:m.type==='BUY'?'매수':'매도',color:m.type==='BUY'?'#22c55e':'#ef4444',price:m.price.toLocaleString(),time:m.time,date:this._axisDateLabel(m.t,true),pnlText:hasPnl?((pnl>=0?'+':'')+pnl.toFixed(2)+'%'):'-',pnlColor:hasPnl?(pnl>=0?'#22c55e':'#ef4444'):'#7d8794'}; });
+    const monitorSpan=this._chartSpan(s.monitorChartSpan);
+    const monitorChartCandles=s.monitorHistoryCandles.length?s.monitorHistoryCandles:s.monitorCandles;
+    const monitorChartKey=this._monitorChartKey(s.monitorMarket,monitorSpan.key);
+    const monitorChartHint=s.monitorHistoryLoading
+      ? monitorSpan.label+' · '+monitorSpan.candleLabel+' 불러오는 중'
+      : (s.monitorHistoryCandles.length
+        ? monitorSpan.label+' · '+monitorSpan.candleLabel+' · '+s.monitorHistoryCandles.length.toLocaleString()+'개'
+        : '실시간 신호용 1분봉');
     let metricCards=[];
     if(bt){ const m=bt.metrics; metricCards=[
       {label:'총 수익률',value:(m.totalReturn>=0?'+':'')+m.totalReturn.toFixed(1)+'%',color:m.totalReturn>=0?'#22c55e':'#ef4444',sub:'전략 누적'},
@@ -409,8 +575,8 @@ class App extends React.Component {
       quickMonitorMarkets,
       monitorError:s.monitorError,
       lastCandleTime:s.lastCandleTime,
-      livePriceFmt:s.price.toLocaleString(),
-      topPriceColor:s.price>=s.prevPrice?'#22c55e':'#ef4444',
+      livePriceFmt:hasLivePrice?livePrice.toLocaleString():'-',
+      topPriceColor,
       navSurveyStyle:nav('survey'),navStrategyStyle:nav('strategy'),navBacktestStyle:nav('backtest'),navMonitorStyle:nav('monitor'),navSettingsStyle:nav('settings'),
       doneCount:this.doneCount(),
       isSurvey:s.screen==='survey',isStrategy:s.screen==='strategy',isBacktest:s.screen==='backtest',isMonitor:s.screen==='monitor',isSettings:s.screen==='settings',
@@ -423,7 +589,7 @@ class App extends React.Component {
       clearDrawStyle:{...chip(false,'#ef4444'),opacity:drawingCount?0.95:0.55,cursor:drawingCount?'pointer':'not-allowed'},
       chartDrawCount:drawingCount,
       chartPendingText:s.pendingDrawing&&s.pendingDrawing.survey===s.surveyIndex?'추세선 1점 선택됨':'',
-      surveyChartEl:this._candleChart(cur.candles,{height:520,range:s.chartRange,indicators:s.chartIndicators,drawings:s.chartDrawings[s.surveyIndex]||[],pendingDrawing:s.pendingDrawing,surveyIndex:s.surveyIndex,tool:s.chartTool,onChartClick:this.onChartPoint,clipId:'survey-price-clip-'+s.surveyIndex,intraday:cur.tf!=='일'}),
+      surveyChartEl:this._chartWithControls(cur.candles,{height:520,defaultRange:s.chartRange,indicators:s.chartIndicators,drawings:s.chartDrawings[s.surveyIndex]||[],pendingDrawing:s.pendingDrawing,surveyIndex:s.surveyIndex,tool:s.chartTool,onChartClick:this.onChartPoint,clipId:'survey-price-clip-'+s.surveyIndex,chartViewKey:'survey-'+s.surveyIndex,intraday:chartNeedsTime(cur.candles)}),
       featureRows:fr,
       goPrev:this.goPrev,goNext:this.goNext,
       setBuy:this.setBuy,setSell:this.setSell,setHold:this.setHold,
@@ -460,16 +626,18 @@ class App extends React.Component {
       hasBacktest:!!s.backtest,
       metricCards,
       equityChartEl:bt?this._equityChart(bt.eq,bt.bh,A,bt.candles,bt.rangeKey):null,
-      backtestChartEl:bt?this._candleChart(bt.candles,{markers:bt.markers,height:300,intraday:false,clipId:'backtest-price-clip',chartKey:bt.rangeKey}):null,
+      backtestChartEl:bt?this._chartWithControls(bt.candles,{markers:bt.markers,height:300,intraday:false,clipId:'backtest-price-clip',chartKey:bt.rangeKey,chartViewKey:'backtest-'+bt.rangeKey}):null,
       consistencyPct:cons?cons.pct:0,consistencyTotal:cons?cons.total:0,consistencyWidth:cons?(cons.pct+'%'):'0%',
       hasMismatch:!!cons&&cons.mism.length>0,noMismatch:!!cons&&cons.mism.length===0,mismatchItems:mism,
       monNeedStrategy:!s.strategy,
       signalText:s.signal==='BUY'?'BUY · 매수 신호':s.signal==='SELL'?'SELL · 매도 신호':'HOLD · 관망',
       signalColor:s.signal==='BUY'?'#22c55e':s.signal==='SELL'?'#ef4444':'#f59e0b',
       signalReason:s.signalReason,
-      priceChangePct:(((s.price-this._open)/this._open*100)>=0?'+':'')+((s.price-this._open)/this._open*100).toFixed(2)+'%',
-      hasMonitorCandles:s.monitorCandles.length>0,
-      monitorChartEl:s.monitorCandles.length?this._candleChart(s.monitorCandles,{height:360,range:120,indicators:{maBinance:true,bb:true,volume:true},markers:s.monitorMarkers,clipId:'monitor-price-clip',intraday:true}):null,
+      priceChangePct,
+      hasMonitorCandles:monitorChartCandles.length>0,
+      monitorHistoryLoading:s.monitorHistoryLoading,
+      monitorChartHint,
+      monitorChartEl:monitorChartCandles.length?this._chartWithControls(monitorChartCandles,{height:360,defaultRange:monitorChartCandles.length,indicators:{maBinance:true,bb:true,volume:true},markers:s.monitorMarkers,clipId:'monitor-price-clip',chartViewKey:monitorChartKey,activeSpanKey:monitorSpan.key,onSpanSelect:this._selectMonitorChartSpan,intraday:monitorSpan.source!=='daily'}):null,
       markMonitorBuy:()=>this.markMonitorDecision('BUY'),
       markMonitorSell:()=>this.markMonitorDecision('SELL'),
       clearMonitorMarkers:this.clearMonitorMarkers,
@@ -486,7 +654,7 @@ class App extends React.Component {
       notifBtnStyle:(()=>{ const on=s.notifPerm==='granted'; const off=s.notifPerm==='denied'||s.notifPerm==='unsupported'; const b='border-radius:7px;padding:7px 12px;font-size:12px;white-space:nowrap;'; if(on) return b+'background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);color:#22c55e;cursor:default;'; if(off) return b+'background:#0e131b;border:1px solid #1f2630;color:#5a6472;cursor:not-allowed;'; return b+'background:#0e131b;border:1px solid #1f2630;color:#9aa4b1;cursor:pointer;'; })(),
       alertItems:s.alerts,hasAlerts:s.alerts.length>0,noAlerts:s.alerts.length===0,
       liveHint:this.props.liveSim===false?'(시뮬레이션 꺼짐 — 테스트 발송으로 확인)':'',
-      alertConfig:s.alertConfig,saveAlertConfig:this.saveAlertConfig,sendTestAlert:this.sendTestAlert,backendStatus:s.backendStatus,samplePrice:s.price,
+      alertConfig:s.alertConfig,saveAlertConfig:this.saveAlertConfig,sendTestAlert:this.sendTestAlert,backendStatus:s.backendStatus,samplePrice:livePrice,
       toasts:s.toasts,dismissToast:this.dismissToast
     };
   }

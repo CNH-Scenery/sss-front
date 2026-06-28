@@ -8,19 +8,24 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     setError("");
     if (!email.trim() || !password) {
       setError("이메일과 비밀번호를 입력하세요.");
       return;
     }
+    setSubmitting(true);
     try {
-      login(email, password);
+      await login(email, password);
       navigate("/", { replace: true });
     } catch (ex) {
       setError(ex.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -55,7 +60,9 @@ export default function Login() {
           autoComplete="current-password"
         />
         <FormError>{error}</FormError>
-        <PrimaryButton type="submit">로그인 →</PrimaryButton>
+        <PrimaryButton type="submit" disabled={submitting}>
+          {submitting ? "로그인 중..." : "로그인 →"}
+        </PrimaryButton>
       </form>
     </AuthLayout>
   );

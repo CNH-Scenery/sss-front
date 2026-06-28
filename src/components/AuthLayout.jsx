@@ -44,11 +44,12 @@ export function FormError({ children }) {
   );
 }
 
-export function PrimaryButton({ children, ...props }) {
+export function PrimaryButton({ children, disabled, ...props }) {
   return (
     <button
       {...props}
-      style={css(`width:100%;border:none;border-radius:10px;padding:12px;font-weight:700;font-size:14px;cursor:pointer;background:linear-gradient(90deg,#4f8cff,#22c55e);color:#06101f;margin-top:4px`)}
+      disabled={disabled}
+      style={css(`width:100%;border:none;border-radius:10px;padding:12px;font-weight:700;font-size:14px;margin-top:4px;${disabled ? "cursor:not-allowed;background:#1a212c;color:#5a6472;" : "cursor:pointer;background:linear-gradient(90deg,#4f8cff,#22c55e);color:#06101f;"}`)}
     >
       {children}
     </button>
