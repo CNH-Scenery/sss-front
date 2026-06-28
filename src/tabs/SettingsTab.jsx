@@ -6,13 +6,6 @@ const card = `background:#11151c;border:1px solid #1f2630;border-radius:12px;pad
 const label = `font-size:12.5px;color:#9aa4b1;font-weight:600;margin-bottom:7px`;
 const input = `width:100%;background:#0d1117;border:1.5px solid #1f2630;border-radius:9px;padding:10px 12px;color:#e6edf3;font-size:13px;font-family:'Pretendard',sans-serif`;
 
-const STATUS = {
-  connected: { c: "#22c55e", t: "연결됨" },
-  connecting: { c: "#f59e0b", t: "연결 중…" },
-  disconnected: { c: "#ef4444", t: "끊김 (재연결 중)" },
-  off: { c: "#5a6472", t: "비활성 (URL 미설정)" },
-};
-
 const ACTIONS = [
   { key: "BUY", label: "매수" },
   { key: "SELL", label: "매도" },
@@ -42,30 +35,17 @@ export default function SettingsTab({ v }) {
 
   const sample = normalizePayload({ action: "BUY", market: "KRW-BTC", price: v.samplePrice || 91383000, reason: "RSI 31 과매도 + 거래량 1.7x" });
   const preview = formatAlert(cfg, sample);
-  const st = STATUS[v.backendStatus] || STATUS.off;
 
   return (
     <div>
       <div style={css(`margin-bottom:18px`)}>
         <div style={css(`font-size:11px;letter-spacing:0.1em;color:#4f8cff;font-weight:700;margin-bottom:6px`)}>설정</div>
         <h1 style={css(`margin:0;font-size:22px;font-weight:700;letter-spacing:-0.02em`)}>알림 형식 설정</h1>
-        <div style={css(`color:#7d8794;font-size:13px;margin-top:5px`)}>백엔드 소켓이 보내는 알림을 인앱 모달 + 데스크톱 알림으로 어떻게 표시할지 정합니다.</div>
+        <div style={css(`color:#7d8794;font-size:13px;margin-top:5px`)}>전략 신호 알림을 인앱 모달 + 데스크톱 알림으로 어떻게 표시할지 정합니다.</div>
       </div>
 
       <div style={css(`display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start`)}>
         <div style={css(`min-width:0`)}>
-
-          <div style={css(card)}>
-            <div style={css(`display:flex;align-items:center;justify-content:space-between;margin-bottom:12px`)}>
-              <div style={css(`font-weight:700;font-size:14px`)}>백엔드 소켓</div>
-              <span style={css(`display:flex;align-items:center;gap:7px;font-size:11.5px;color:#9aa4b1`)}>
-                <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: st.c }}></span>{st.t}
-              </span>
-            </div>
-            <div style={css(label)}>소켓 URL</div>
-            <input value={cfg.backendUrl} onChange={(e) => set({ backendUrl: e.target.value })} placeholder="wss://your-backend/alerts" style={css(input + `;font-family:'JetBrains Mono',monospace`)} />
-            <div style={css(`font-size:11px;color:#5a6472;margin-top:7px;line-height:1.5`)}>표준 스키마: <span style={css(`font-family:'JetBrains Mono',monospace;color:#9aa4b1`)}>{`{ type:"alert", action, market, price, reason, severity, ts }`}</span></div>
-          </div>
 
           <div style={css(card)}>
             <div style={css(`font-weight:700;font-size:14px;margin-bottom:12px`)}>제목·본문 템플릿</div>
