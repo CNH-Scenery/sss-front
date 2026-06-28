@@ -18,8 +18,8 @@ export default function Topbar({ v }) {
             <div style={css(`font-size:10.5px;color:#5a6472;border:1px solid #1f2630;border-radius:5px;padding:2px 6px;margin-left:2px`)}>internal</div>
           </div>
           <div className="tt-topbar-status" style={css(`display:flex;align-items:center;gap:9px;font-family:'JetBrains Mono',monospace;font-size:12.5px`)}>
-            <span style={css(`width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 7px #22c55e`)}></span>
-            <span style={css(`color:#7d8794`)}>업비트 시세 연결됨</span>
+            <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: v.wsConnected ? "#22c55e" : "#f59e0b", boxShadow: v.wsConnected ? "0 0 7px #22c55e" : "none" }}></span>
+            <span style={css(`color:#7d8794`)}>{v.wsConnected ? "업비트 시세 연결됨" : "업비트 연결 중…"}</span>
             <span style={css(`color:#e6edf3;margin-left:8px`)}>KRW-BTC</span>
             <span style={{ color: v.topPriceColor }}>{v.livePriceFmt}</span>
             <span style={css(`width:1px;height:18px;background:#1f2630;margin:0 4px`)}></span>
