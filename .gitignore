@@ -5,3 +5,9 @@ dist
 .vite
 *.log
 package-lock.json
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.db
+backend/.venv/
+backend/*.egg-info/
