@@ -6,7 +6,12 @@ import SurveyTab from "./tabs/SurveyTab.jsx";
 import StrategyTab from "./tabs/StrategyTab.jsx";
 import BacktestTab from "./tabs/BacktestTab.jsx";
 import MonitorTab from "./tabs/MonitorTab.jsx";
+import SettingsTab from "./tabs/SettingsTab.jsx";
+import AlertToasts from "./components/AlertToasts.jsx";
 import { notifPermission, requestNotifyPermission, sendNotification } from "./notify.js";
+import { loadConfig, saveConfig, normalizePayload, formatAlert, pickColor } from "./alerts/alertConfig.js";
+import { createAlertSocket } from "./alerts/alertSocket.js";
+import { beep } from "./alerts/sound.js";
 
 class App extends React.Component {
   constructor(props){
@@ -18,11 +23,35 @@ class App extends React.Component {
     this.state={ screen:'survey', surveyIndex:0, responses:{}, draftAction:null, draftReason:'',
       strategy:null, codifying:false, versions:[], correctionDraft:'',
       backtest:null, backtesting:false, consistency:null,
-      price:92418000, prevPrice:92418000, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false };
+      price:92418000, prevPrice:92418000, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false,
+      alertConfig:loadConfig(), toasts:[], backendStatus:'off' };
   }
-  componentDidMount(){ this._connectWs(); this._poll=setInterval(this._pollSignal,4000); this._pollSignal(); if(this.props.demoMode) this.fillDemo(); }
+  componentDidMount(){ this._connectWs(); this._poll=setInterval(this._pollSignal,4000); this._pollSignal(); this._initBackend(); if(this.props.demoMode) this.fillDemo(); }
   componentDidUpdate(prev){ if(!prev.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); }
-  componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); clearInterval(this._ping); clearTimeout(this._reco); if(this._ws){ try{ this._ws.onclose=null; this._ws.close(); }catch(e){} } }
+  componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); clearInterval(this._ping); clearTimeout(this._reco); if(this._ws){ try{ this._ws.onclose=null; this._ws.close(); }catch(e){} } if(this._alertSock) this._alertSock.close(); }
+
+  // ── 백엔드 알림 소켓 + 통합 알림 발생기 ─────────────────────────
+  _initBackend(){
+    if(this._alertSock){ this._alertSock.close(); this._alertSock=null; }
+    const url=this.state.alertConfig.backendUrl;
+    if(url){ this.setState({backendStatus:'connecting'}); this._alertSock=createAlertSocket(url, this._emitAlert, (stt)=>this.setState({backendStatus:stt})); }
+    else this.setState({backendStatus:'off'});
+  }
+  saveAlertConfig=(cfg)=>{ const prevUrl=this.state.alertConfig.backendUrl; this.setState({alertConfig:cfg},()=>{ saveConfig(cfg); if(cfg.backendUrl!==prevUrl) this._initBackend(); }); };
+  dismissToast=(id)=>this.setState(s=>({toasts:s.toasts.filter(t=>t.id!==id)}));
+  _emitAlert=(payload)=>{
+    const cfg=this.state.alertConfig;
+    const norm=normalizePayload(payload);
+    const view=formatAlert(cfg,norm);
+    const color=pickColor(cfg,norm);
+    const id=this._toastId=(this._toastId||0)+1;
+    const feedItem={action:norm.action,color,text:'['+norm.market+'] '+norm.action+' · '+(norm.reason||'-')+' · '+norm.priceFmt+'원',time:norm.time};
+    this.setState(s=>({ alerts:[feedItem,...s.alerts].slice(0,8), toasts:[...s.toasts,{id,...view}] }));
+    if(cfg.sound) beep();
+    sendNotification(view.title, view.body, 'tt-alert');
+    if(cfg.autoDismissMs>0) setTimeout(()=>this.dismissToast(id), cfg.autoDismissMs);
+  };
+  sendTestAlert=()=>this._emitAlert({action:'BUY',market:'KRW-BTC',price:this.state.price,reason:'[테스트] RSI 31 과매도 + 거래량 1.7x',severity:'info'});
 
   // ── 업비트 실시간 시세 (WebSocket) ──────────────────────────────
   _connectWs(){
@@ -72,12 +101,8 @@ class App extends React.Component {
         let fired=null;
         if(action==='BUY' && !mon.holding){ mon.holding=true; mon.entry=price; fired={sig:'BUY',reason}; }
         else if(action==='SELL' && mon.holding){ mon.holding=false; fired={sig:'SELL',reason}; }
-        this.setState(s=>{
-          const u={signal:action,signalReason:reason};
-          if(fired){ const col=fired.sig==='BUY'?'#22c55e':'#ef4444'; u.alerts=[{action:fired.sig,color:col,text:'[KRW-BTC] '+fired.sig+' 신호 · '+fired.reason+' · '+price.toLocaleString()+'원',time:this._now()},...s.alerts].slice(0,8); }
-          return u;
-        });
-        if(fired) sendNotification('Tacit Trader · '+fired.sig+' 신호', '[KRW-BTC] '+fired.reason+' · '+price.toLocaleString()+'원', 'tt-signal');
+        this.setState({signal:action,signalReason:reason});
+        if(fired) this._emitAlert({action:fired.sig,market:'KRW-BTC',price,reason:fired.reason});
       })
       .catch(()=>{});
   };
@@ -136,6 +161,7 @@ class App extends React.Component {
   goStrategy=()=>this.setState({screen:'strategy'});
   goBacktest=()=>this.setState({screen:'backtest'});
   goMonitor=()=>this.setState({screen:'monitor'});
+  goSettings=()=>this.setState({screen:'settings'});
   _setSurvey=(i)=>{ i=Math.max(0,Math.min(9,i)); const r=this.state.responses[i]; this.setState({surveyIndex:i,draftAction:r?r.action:null,draftReason:r?r.reason:''}); };
   goPrev=()=>this._setSurvey(this.state.surveyIndex-1);
   goNext=()=>this._setSurvey(this.state.surveyIndex+1);
@@ -150,7 +176,7 @@ class App extends React.Component {
   runBacktest=()=>{ if(this.state.backtesting||!this.state.strategy)return; this.setState({backtesting:true}); setTimeout(()=>{ this.setState({backtesting:false,backtest:this._runBacktestData()}); },1500); };
   onWebhook=(e)=>this.setState({webhookDraft:e.target.value});
   enableNotifications=()=>{ requestNotifyPermission().then(p=>this.setState({notifPerm:p})); };
-  testAlert=()=>{ const al={action:'BUY',color:'#22c55e',text:'[테스트] KRW-BTC BUY 신호 · RSI 31 과매도 + 거래량 1.7x · '+this.state.price.toLocaleString()+'원',time:this._now()}; this.setState(s=>({alerts:[al,...s.alerts].slice(0,8)})); sendNotification('Tacit Trader · 테스트 알림', al.text, 'tt-test'); };
+  testAlert=()=>this.sendTestAlert();
 
   renderVals(){
     const s=this.state; const A=this.props.accent||'#4f8cff';
@@ -185,10 +211,10 @@ class App extends React.Component {
       wsConnected:s.wsConnected,
       livePriceFmt:s.price.toLocaleString(),
       topPriceColor:s.price>=s.prevPrice?'#22c55e':'#ef4444',
-      navSurveyStyle:nav('survey'),navStrategyStyle:nav('strategy'),navBacktestStyle:nav('backtest'),navMonitorStyle:nav('monitor'),
+      navSurveyStyle:nav('survey'),navStrategyStyle:nav('strategy'),navBacktestStyle:nav('backtest'),navMonitorStyle:nav('monitor'),navSettingsStyle:nav('settings'),
       doneCount:this.doneCount(),
-      isSurvey:s.screen==='survey',isStrategy:s.screen==='strategy',isBacktest:s.screen==='backtest',isMonitor:s.screen==='monitor',
-      goSurvey:this.goSurvey,goStrategy:this.goStrategy,goBacktest:this.goBacktest,goMonitor:this.goMonitor,
+      isSurvey:s.screen==='survey',isStrategy:s.screen==='strategy',isBacktest:s.screen==='backtest',isMonitor:s.screen==='monitor',isSettings:s.screen==='settings',
+      goSurvey:this.goSurvey,goStrategy:this.goStrategy,goBacktest:this.goBacktest,goMonitor:this.goMonitor,goSettings:this.goSettings,
       progressWidth:(this.doneCount()/10*100)+'%',
       curMarket:cur.market,curTf:cur.tf,surveyNo:s.surveyIndex+1,
       surveyChartEl:this._candleChart(cur.candles,{height:300}),
@@ -237,7 +263,9 @@ class App extends React.Component {
       notifLabel:s.notifPerm==='granted'?'🔔 알림 켜짐':s.notifPerm==='denied'?'알림 차단됨':s.notifPerm==='unsupported'?'알림 미지원':'🔔 데스크톱 알림 켜기',
       notifBtnStyle:(()=>{ const on=s.notifPerm==='granted'; const off=s.notifPerm==='denied'||s.notifPerm==='unsupported'; const b='border-radius:7px;padding:7px 12px;font-size:12px;white-space:nowrap;'; if(on) return b+'background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);color:#22c55e;cursor:default;'; if(off) return b+'background:#0e131b;border:1px solid #1f2630;color:#5a6472;cursor:not-allowed;'; return b+'background:#0e131b;border:1px solid #1f2630;color:#9aa4b1;cursor:pointer;'; })(),
       alertItems:s.alerts,hasAlerts:s.alerts.length>0,noAlerts:s.alerts.length===0,
-      liveHint:this.props.liveSim===false?'(시뮬레이션 꺼짐 — 테스트 발송으로 확인)':''
+      liveHint:this.props.liveSim===false?'(시뮬레이션 꺼짐 — 테스트 발송으로 확인)':'',
+      alertConfig:s.alertConfig,saveAlertConfig:this.saveAlertConfig,sendTestAlert:this.sendTestAlert,backendStatus:s.backendStatus,samplePrice:s.price,
+      toasts:s.toasts,dismissToast:this.dismissToast
     };
   }
 
@@ -254,9 +282,11 @@ class App extends React.Component {
               {v.isStrategy && <StrategyTab v={v} />}
               {v.isBacktest && <BacktestTab v={v} />}
               {v.isMonitor && <MonitorTab v={v} />}
+              {v.isSettings && <SettingsTab v={v} />}
             </div>
           </div>
         </div>
+        <AlertToasts toasts={v.toasts} onClose={v.dismissToast} />
       </div>
     );
   }
