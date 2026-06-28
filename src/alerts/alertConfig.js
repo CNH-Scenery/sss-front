@@ -12,7 +12,7 @@ export const PLACEHOLDERS = ["action", "actionLabel", "market", "price", "reason
 
 export const DEFAULT_CONFIG = {
   backendUrl: "",                                  // ws(s)://… 비어있으면 백엔드 소켓 비활성
-  titleTemplate: "{action} · {market}",
+  titleTemplate: "{actionLabel} · {market}",
   bodyTemplate: "{reason} · {price}원 · {time}",
   fields: { market: true, price: true, reason: true, time: true },
   colors: { BUY: "#22c55e", SELL: "#ef4444", WARN: "#f59e0b", INFO: "#4f8cff" },
@@ -35,10 +35,38 @@ export function saveConfig(cfg) {
   try { localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg)); } catch { /* ignore */ }
 }
 
+const MONITOR_ALERT_PRESETS = {
+  BUY: { severity: "info", fallback: "전략 매수 조건 충족" },
+  SELL: { severity: "warning", fallback: "전략 매도 조건 충족" },
+  HOLD: { severity: "info", fallback: "전략 관망 조건 유지" },
+  WARN: { severity: "warning", fallback: "모니터링 확인 필요" },
+  INFO: { severity: "info", fallback: "모니터링 알림" },
+};
+
 function pad(n) { return String(n).padStart(2, "0"); }
 function tsToTime(ts) {
   const d = ts ? new Date(ts) : new Date();
   return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+}
+
+export function createMonitorAlertPayload({ action = "INFO", market = "KRW-BTC", price = 0, reason = "", features = null, ts = Date.now() }) {
+  const normalizedAction = String(action || "INFO").toUpperCase();
+  const preset = MONITOR_ALERT_PRESETS[normalizedAction] || MONITOR_ALERT_PRESETS.INFO;
+  const detailParts = [];
+
+  if (reason) detailParts.push(reason);
+  if (!reason && features?.rsi14 != null) detailParts.push("RSI " + Number(features.rsi14).toFixed(0));
+  if (!reason && features?.vol_ratio != null) detailParts.push("거래량 " + Number(features.vol_ratio).toFixed(1) + "x");
+
+  return {
+    type: "alert",
+    action: normalizedAction,
+    market,
+    price,
+    reason: detailParts.length ? detailParts.join(" · ") : preset.fallback,
+    severity: preset.severity,
+    ts,
+  };
 }
 
 // 백엔드/내부 페이로드를 표시용으로 정규화.

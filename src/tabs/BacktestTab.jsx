@@ -2,6 +2,10 @@ import React from "react";
 import { css } from "../css.js";
 
 export default function BacktestTab({ v }) {
+  const runOnEnter = (event) => {
+    if (event.key === "Enter") v.runBacktest();
+  };
+
   return (
               <div>
                 <div style={css(`margin-bottom:18px`)}>
@@ -20,21 +24,36 @@ export default function BacktestTab({ v }) {
 
                 {v.hasStrategy && (
                   <div>
-                    <div style={css(`display:flex;align-items:center;justify-content:space-between;gap:16px;background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:13px 16px;margin-bottom:16px;flex-wrap:wrap`)}>
-                      <div style={css(`display:flex;align-items:center;gap:12px;flex-wrap:wrap`)}>
-                        <span style={css(`font-size:13px;color:#9aa4b1`)}>적용 전략</span>
-                        <span style={css(`font-family:'JetBrains Mono',monospace;font-size:12px;color:#4f8cff;background:rgba(79,140,255,.12);border-radius:5px;padding:3px 9px`)}>{v.btVersionLabel}</span>
-                        <span style={css(`font-size:13px;color:#9aa4b1;margin-left:6px`)}>구간</span>
-                        <span style={css(`display:flex;gap:5px`)}>
-                          <span style={css(`font-size:12px;color:#5a6472;border:1px solid #1f2630;border-radius:6px;padding:4px 9px`)}>60봉</span>
-                          <span style={css(`font-size:12px;color:#e6edf3;border:1px solid #4f8cff;background:rgba(79,140,255,.12);border-radius:6px;padding:4px 9px`)}>120봉</span>
-                          <span style={css(`font-size:12px;color:#5a6472;border:1px solid #1f2630;border-radius:6px;padding:4px 9px`)}>240봉</span>
-                        </span>
+                    <div style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:13px 16px;margin-bottom:16px`)}>
+                      <div style={css(`display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap`)}>
+                        <div style={css(`display:grid;gap:10px;flex:1;min-width:280px`)}>
+                          <div style={css(`display:flex;align-items:center;gap:12px;flex-wrap:wrap`)}>
+                            <span style={css(`font-size:13px;color:#9aa4b1`)}>적용 전략</span>
+                            <span style={css(`font-family:'JetBrains Mono',monospace;font-size:12px;color:#4f8cff;background:rgba(79,140,255,.12);border-radius:5px;padding:3px 9px`)}>{v.btVersionLabel}</span>
+                            <span style={css(`font-size:12px;color:#e6edf3;border:1px solid #4f8cff;background:rgba(79,140,255,.12);border-radius:6px;padding:4px 9px`)}>최근 1년 · 일봉</span>
+                          </div>
+                          <div style={css(`display:flex;align-items:center;gap:8px;flex-wrap:wrap`)}>
+                            <span style={css(`font-size:13px;color:#9aa4b1`)}>마켓</span>
+                            <input ref={v.backtestMarketRef} value={v.backtestMarketDraft} onChange={v.onBacktestMarket} onKeyDown={runOnEnter} spellCheck={false} style={css(`width:122px;background:#0e131b;border:1px solid #26303d;border-radius:7px;color:#e6edf3;padding:7px 9px;font-family:'JetBrains Mono',monospace;font-size:12px;outline:none;text-transform:uppercase`)} />
+                            <span style={css(`display:flex;gap:5px;flex-wrap:wrap`)}>
+                              {v.quickBacktestMarkets.map((m) => (
+                                <button key={m.market} onClick={m.onClick} style={m.style}>{m.market.replace("KRW-", "")}</button>
+                              ))}
+                            </span>
+                          </div>
+                          <div style={css(`display:flex;align-items:center;gap:8px;flex-wrap:wrap`)}>
+                            <span style={css(`font-size:13px;color:#9aa4b1`)}>적용 기간</span>
+                            <input ref={v.backtestStartRef} type="date" defaultValue={v.backtestStartDate} onChange={v.onBacktestStartDate} onKeyDown={runOnEnter} style={css(`background:#0e131b;border:1px solid #26303d;border-radius:7px;color:#e6edf3;padding:7px 9px;font-family:'JetBrains Mono',monospace;font-size:12px;outline:none;color-scheme:dark`)} />
+                            <span style={css(`font-size:12px;color:#5a6472`)}>~</span>
+                            <input ref={v.backtestEndRef} type="date" defaultValue={v.backtestEndDate} onChange={v.onBacktestEndDate} onKeyDown={runOnEnter} style={css(`background:#0e131b;border:1px solid #26303d;border-radius:7px;color:#e6edf3;padding:7px 9px;font-family:'JetBrains Mono',monospace;font-size:12px;outline:none;color-scheme:dark`)} />
+                          </div>
+                        </div>
+                        <button onClick={v.runBacktest} disabled={v.backtesting} style={css(v.backtestBtnStyle)}>
+                          {v.backtesting && (<span><span style={css(`display:inline-block;width:13px;height:13px;border:2px solid rgba(6,16,31,.35);border-top-color:#06101f;border-radius:50%;animation:tt-spin .7s linear infinite;margin-right:7px;vertical-align:-2px`)}></span>실행 중…</span>)}
+                          {v.notBacktesting && (<span>{v.backtestLabel}</span>)}
+                        </button>
                       </div>
-                      <button onClick={v.runBacktest} style={css(v.backtestBtnStyle)}>
-                        {v.backtesting && (<span><span style={css(`display:inline-block;width:13px;height:13px;border:2px solid rgba(6,16,31,.35);border-top-color:#06101f;border-radius:50%;animation:tt-spin .7s linear infinite;margin-right:7px;vertical-align:-2px`)}></span>실행 중…</span>)}
-                        {v.notBacktesting && (<span>{v.backtestLabel}</span>)}
-                      </button>
+                      <div style={css(`font-size:12px;color:${v.hasBacktestError ? "#ef4444" : "#7d8794"};margin-top:10px;line-height:1.5`)}>{v.hasBacktestError ? v.backtestError : v.backtestMetaText}</div>
                     </div>
 
                     {v.showBtIdle && (

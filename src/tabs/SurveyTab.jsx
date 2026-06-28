@@ -18,8 +18,8 @@ export default function SurveyTab({ v }) {
                   </div>
                 </div>
 
-                <div className="tt-survey-grid" style={css(`display:grid;grid-template-columns:minmax(0,1.9fr) minmax(260px,.7fr);gap:16px;align-items:start`)}>
-                  <div className="tt-chart-card" style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:16px;min-width:0`)}>
+                <div className="tt-survey-grid" style={css(`display:grid;grid-template-columns:minmax(0,2.75fr) minmax(240px,.62fr);gap:18px;align-items:start`)}>
+                  <div className="tt-chart-card" style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:18px;min-width:0`)}>
                     <div style={css(`display:flex;align-items:center;justify-content:space-between;margin-bottom:12px`)}>
                       <div style={css(`display:flex;align-items:center;gap:8px`)}>
                         <span style={css(`font-weight:700;font-size:15px`)}>{v.curMarket}</span>

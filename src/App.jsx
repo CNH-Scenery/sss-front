@@ -9,29 +9,62 @@ import MonitorTab from "./tabs/MonitorTab.jsx";
 import SettingsTab from "./tabs/SettingsTab.jsx";
 import AlertToasts from "./components/AlertToasts.jsx";
 import { notifPermission, requestNotifyPermission, sendNotification } from "./notify.js";
-import { loadConfig, saveConfig, normalizePayload, formatAlert, pickColor } from "./alerts/alertConfig.js";
+import { createUpbitTickerSocket, fetchUpbitDailyCandles, fetchUpbitMinuteCandles, normalizeUpbitMarket } from "./upbit.js";
+import { createMonitorAlertPayload, loadConfig, saveConfig, normalizePayload, formatAlert, pickColor } from "./alerts/alertConfig.js";
 import { createAlertSocket } from "./alerts/alertSocket.js";
 import { beep } from "./alerts/sound.js";
 
+const dateOnly = (value) => String(value || "").slice(0, 10);
+const toLocalDateInput = (date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
+const toLocalDateTime = (date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16) + ":00";
+};
+const createDefaultBacktestRange = () => {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 364);
+  return { start: toLocalDateInput(start), end: toLocalDateInput(end) };
+};
+const parseChartTime = (value) => {
+  const time = new Date(String(value || "").replace(" ", "T"));
+  return Number.isNaN(time.getTime()) ? null : time;
+};
+const chartNeedsTime = (candles) => {
+  for(let i=1;i<candles.length;i++){
+    const prev=parseChartTime(candles[i-1]?.t),cur=parseChartTime(candles[i]?.t);
+    if(prev&&cur) return Math.abs(cur-prev)<20*60*60*1000;
+  }
+  return false;
+};
 class App extends React.Component {
   constructor(props){
     super(props);
+    this._backtestMarketInput=React.createRef();
+    this._backtestStartInput=React.createRef();
+    this._backtestEndInput=React.createRef();
+    const defaultBacktestRange=createDefaultBacktestRange();
     this._codeParams={rsiBuy:42,volBuy:1.05,rsiSell:60,pnlTake:10,pnlStop:-6,extra:[]};
+    this._backtestCandleCache={};
     this._open=92418000; this._openReal=false;
     this._mon={holding:false,entry:0};  // 실시간 모니터링용 가상 포지션
     this.surveys=this._buildSurveys();
     this.state={ screen:'survey', surveyIndex:0, responses:{}, draftAction:null, draftReason:'',
       strategy:null, codifying:false, versions:[], correctionDraft:'',
-      backtest:null, backtesting:false, consistency:null,
+      backtest:null, backtesting:false, backtestError:'', backtestMarket:'KRW-BTC', backtestMarketDraft:'KRW-BTC', backtestStartDate:defaultBacktestRange.start, backtestEndDate:defaultBacktestRange.end, consistency:null,
+      monitorMarket:'KRW-BTC', monitorMarketDraft:'KRW-BTC', monitorError:'', lastCandleTime:'', monitorCandles:[], monitorMarkers:[],
       price:92418000, prevPrice:92418000, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false,
       alertConfig:loadConfig(), toasts:[], backendStatus:'off',
       chartRange:30,
       chartIndicators:{maBinance:true,maClassic:false,bb:true,vwap:false,volume:true,rsi:true,macd:false},
       chartTool:'cursor', chartDrawings:{}, pendingDrawing:null };
   }
-  componentDidMount(){ this._connectWs(); this._poll=setInterval(this._pollSignal,4000); this._pollSignal(); this._initBackend(); if(this.props.demoMode) this.fillDemo(); }
-  componentDidUpdate(prev){ if(!prev.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); }
-  componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); clearInterval(this._ping); clearTimeout(this._reco); if(this._ws){ try{ this._ws.onclose=null; this._ws.close(); }catch(e){} } if(this._alertSock) this._alertSock.close(); }
+  componentDidMount(){ this._unmounted=false; this._connectWs(); this._poll=setInterval(this._pollSignal,4000); this._pollSignal(); this._initBackend(); if(this.props.demoMode) this.fillDemo(); }
+  componentDidUpdate(prevProps){ if(!prevProps.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); }
+  componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); if(this._tickerSock) this._tickerSock.close(); if(this._alertSock) this._alertSock.close(); }
 
   // ── 백엔드 알림 소켓 + 통합 알림 발생기 ─────────────────────────
   _initBackend(){
@@ -46,40 +79,31 @@ class App extends React.Component {
     const cfg=this.state.alertConfig;
     const norm=normalizePayload(payload);
     const view=formatAlert(cfg,norm);
-    const color=pickColor(cfg,norm);
+    const color=view.color||pickColor(cfg,norm);
     const id=this._toastId=(this._toastId||0)+1;
-    const feedItem={action:norm.action,color,text:'['+norm.market+'] '+norm.action+' · '+(norm.reason||'-')+' · '+norm.priceFmt+'원',time:norm.time};
+    const feedItem={action:norm.action,color,text:'['+norm.market+'] '+norm.actionLabel+' · '+(norm.reason||'-')+' · '+norm.priceFmt+'원',time:norm.time};
     this.setState(s=>({ alerts:[feedItem,...s.alerts].slice(0,8), toasts:[...s.toasts,{id,...view}] }));
     if(cfg.sound) beep();
     sendNotification(view.title, view.body, 'tt-alert');
     if(cfg.autoDismissMs>0) setTimeout(()=>this.dismissToast(id), cfg.autoDismissMs);
   };
-  sendTestAlert=()=>this._emitAlert({action:'BUY',market:'KRW-BTC',price:this.state.price,reason:'[테스트] RSI 31 과매도 + 거래량 1.7x',severity:'info'});
+  sendTestAlert=()=>this._emitAlert(createMonitorAlertPayload({action:'BUY',market:this.state.monitorMarket,price:this.state.price,reason:'[테스트] 전략 매수 조건 예시',features:{rsi14:31,vol_ratio:1.7}}));
 
   // ── 업비트 실시간 시세 (WebSocket) ──────────────────────────────
   _connectWs(){
-    if(typeof window==='undefined' || !('WebSocket' in window)) return;
-    let ws;
-    try{ ws=new WebSocket('wss://api.upbit.com/websocket/v1'); }catch(e){ this._scheduleReconnect(); return; }
-    ws.binaryType='arraybuffer'; this._ws=ws;
-    ws.onopen=()=>{
-      this.setState({wsConnected:true});
-      try{ ws.send(JSON.stringify([{ticket:'tacit-trader'},{type:'ticker',codes:['KRW-BTC']},{format:'DEFAULT'}])); }catch(e){}
-      this._ping=setInterval(()=>{ try{ if(ws.readyState===1) ws.send('PING'); }catch(e){} },60000);
-    };
-    ws.onmessage=(ev)=>{
-      let txt; try{ txt = typeof ev.data==='string' ? ev.data : new TextDecoder().decode(ev.data); }catch(e){ return; }
-      let msg; try{ msg=JSON.parse(txt); }catch(e){ return; }
-      if(msg.status) return; // PONG 등 상태 프레임
-      const tp=msg.trade_price; if(typeof tp!=='number') return;
-      const np=Math.round(tp);
-      if(!this._openReal){ this._open=np; this._openReal=true; }
-      this.setState(s=>({prevPrice:s.price, price:np}));
-    };
-    ws.onerror=()=>{ try{ ws.close(); }catch(e){} };
-    ws.onclose=()=>{ clearInterval(this._ping); this.setState({wsConnected:false}); this._scheduleReconnect(); };
+    if(this._tickerSock) this._tickerSock.close();
+    const market=this.state.monitorMarket;
+    this._tickerSock=createUpbitTickerSocket(market,{
+      onStatus:(status)=>{ if(!this._unmounted) this.setState({wsConnected:status==='connected'}); },
+      onTicker:({market:code,price})=>{
+        if(this._unmounted || code!==this.state.monitorMarket) return;
+        const np=Math.round(price);
+        if(!this._openReal){ this._open=np; this._openReal=true; }
+        this.setState(s=>({prevPrice:s.price, price:np, monitorError:''}));
+      },
+      onError:()=>{ if(!this._unmounted) this.setState({wsConnected:false}); },
+    });
   }
-  _scheduleReconnect(){ if(this._unmounted) return; clearTimeout(this._reco); this._reco=setTimeout(()=>this._connectWs(),3000); }
 
   // ── 실시간 지표·신호 (REST 캔들) ─────────────────────────────────
   _signalReason(action,f,holding){
@@ -87,32 +111,42 @@ class App extends React.Component {
     if(action==='SELL') return '과열/목표·손절 도달 · RSI '+f.rsi14.toFixed(0);
     return holding ? ('보유 중 · 청산 대기 · RSI '+f.rsi14.toFixed(0)) : ('조건 불충족 — 관망 · RSI '+f.rsi14.toFixed(0));
   }
-  _pollSignal=()=>{
+  _pollSignal=async()=>{
     if(this._unmounted || !this.state.strategy) return;
-    fetch('https://api.upbit.com/v1/candles/minutes/1?market=KRW-BTC&count=120')
-      .then(r=> r.ok ? r.json() : Promise.reject(new Error('http')))
-      .then(raw=>{
-        if(!Array.isArray(raw)) return;
-        const c=raw.slice().reverse().map(k=>({o:k.opening_price,h:k.high_price,l:k.low_price,c:k.trade_price,v:k.candle_acc_trade_volume}));
-        if(c.length<20) return;
-        const f=this._features(c);
-        const price=Math.round(c[c.length-1].c);
-        const mon=this._mon;
-        const pnl=mon.holding ? (price-mon.entry)/mon.entry*100 : 0;
-        const action=this._strategyDecide(f,mon.holding,pnl);
-        const reason=this._signalReason(action,f,mon.holding);
-        let fired=null;
-        if(action==='BUY' && !mon.holding){ mon.holding=true; mon.entry=price; fired={sig:'BUY',reason}; }
-        else if(action==='SELL' && mon.holding){ mon.holding=false; fired={sig:'SELL',reason}; }
-        this.setState({signal:action,signalReason:reason});
-        if(fired) this._emitAlert({action:fired.sig,market:'KRW-BTC',price,reason:fired.reason});
-      })
-      .catch(()=>{});
+    const market=this.state.monitorMarket;
+    try{
+      const c=await fetchUpbitMinuteCandles(market,1,120);
+      if(this._unmounted || market!==this.state.monitorMarket || c.length<20) return;
+      const f=this._features(c);
+      const price=Math.round(c[c.length-1].c);
+      const mon=this._mon;
+      const pnl=mon.holding ? (price-mon.entry)/mon.entry*100 : 0;
+      const action=this._strategyDecide(f,mon.holding,pnl);
+      const reason=this._signalReason(action,f,mon.holding);
+      let fired=null;
+      if(action==='BUY' && !mon.holding){ mon.holding=true; mon.entry=price; fired={sig:'BUY',reason}; }
+      else if(action==='SELL' && mon.holding){ mon.holding=false; fired={sig:'SELL',reason}; }
+      this.setState(s=>({
+        signal:action,
+        signalReason:reason,
+        monitorError:'',
+        monitorCandles:c,
+        lastCandleTime:c[c.length-1]?.t||'',
+        ...(s.wsConnected?{}:{prevPrice:s.price,price}),
+      }));
+      if(fired) this._emitAlert(createMonitorAlertPayload({action:fired.sig,market,price,reason:fired.reason,features:f}));
+    }catch(error){
+      if(!this._unmounted && market===this.state.monitorMarket) {
+        this.setState({monitorError:error?.message||'업비트 모니터링 데이터를 가져오지 못했습니다.'});
+      }
+    }
   };
 
   _mulberry(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
   _marketBase(m){ const b={'KRW-BTC':92000000,'KRW-ETH':5200000,'KRW-SOL':245000,'KRW-XRP':780,'KRW-DOGE':190}; return b[m]||100000; }
-  _genCandles(seed,n,drift,base){ const rng=this._mulberry(seed); let price=base; const out=[]; for(let i=0;i<n;i++){ const ch=(rng()-0.5)*0.026+drift; const open=price; const close=price*(1+ch); const hi=Math.max(open,close)*(1+rng()*0.007); const lo=Math.min(open,close)*(1-rng()*0.007); const v=Math.round((0.5+rng()*1.8)*1000); out.push({o:open,h:hi,l:lo,c:close,v}); price=close; } return out; }
+  _genCandles(seed,n,drift,base){ const rng=this._mulberry(seed); let price=base; const out=[]; for(let i=0;i<n;i++){ const ch=(rng()-0.5)*0.026+drift; const open=price; const close=price*(1+ch); const hi=Math.max(open,close)*(1+rng()*0.007); const lo=Math.min(open,close)*(1-rng()*0.007); const v=Math.round((0.5+rng()*1.8)*1000),t=toLocalDateTime(new Date(Date.now()-(n-1-i)*86400000)); out.push({o:open,h:hi,l:lo,c:close,v,t}); price=close; } return out; }
+  _timeframeMinutes(tf){ return tf==='일'?1440:(Number(tf)||15); }
+  _stampCandles(c,tf,offsetDays=0){ const unit=this._timeframeMinutes(tf),end=new Date(Date.now()-offsetDays*86400000); return c.map((d,i)=>{ const t=new Date(end.getTime()-(c.length-1-i)*unit*60000); return {...d,t:toLocalDateTime(t)}; }); }
   _rsi(cl,p){ if(cl.length<p+1)return 50; let ag=0,al=0; for(let i=1;i<=p;i++){ const d=cl[i]-cl[i-1]; if(d>0)ag+=d; else al-=d; } ag/=p; al/=p; for(let i=p+1;i<cl.length;i++){ const d=cl[i]-cl[i-1]; ag=(ag*(p-1)+(d>0?d:0))/p; al=(al*(p-1)+(d<0?-d:0))/p; } const rs=ag/(al||1e-9); return 100-100/(1+rs); }
   _features(c){ const cl=c.map(x=>x.c),vs=c.map(x=>x.v),hi=c.map(x=>x.h),lo=c.map(x=>x.l); const last=cl[cl.length-1];
     const ma=n=>{ const s=cl.slice(-Math.min(n,cl.length)); return s.reduce((a,b)=>a+b,0)/s.length; };
@@ -142,9 +176,20 @@ class App extends React.Component {
     {market:'KRW-XRP',tf:'60',title:'V자 반등 초입',intent:'초기 반전 포착과 확인 비용 감수 성향',reason:'투매 뒤 저점이 빠르게 회복되는 흐름이라, 반전 초입을 공격적으로 잡는지 더 높은 가격에 확인 매수하는지 볼 수 있습니다.',tags:['투매','V자 반등','반전 확인'],phases:[{len:45,drift:-0.0045,noise:0.011,vol:1.05},{len:24,drift:-0.0125,noise:0.016,vol:2.0,lowerWick:0.022},{len:28,drift:0.0095,noise:0.013,vol:1.65,lowerWick:0.014},{len:35,drift:0.0028,noise:0.009,vol:1.0}]},
     {market:'KRW-DOGE',tf:'240',title:'전고점 재도전과 거래량 둔화',intent:'확증 편향과 거래량 검증 성향',reason:'가격은 전고점에 가까워지지만 거래량은 줄어드는 구간이라, 차트 모양만 믿는지 참여 강도까지 검증하는지 확인됩니다.',tags:['전고점','거래량 둔화','확인 매매'],phases:[{len:42,drift:0.0038,noise:0.010,vol:1.25},{len:30,drift:-0.001,noise:0.008,vol:0.95},{len:30,drift:0.0044,noise:0.009,vol:0.75},{len:30,drift:0.0022,noise:0.006,vol:0.48,upperWick:0.014}]}
   ]; }
-  _buildSurveys(){ return this._surveyScenarios().map((sc,i)=>{ const candles=this._genScenarioCandles(3000+i*193,this._marketBase(sc.market),sc.phases); const {phases,...meta}=sc; return {...meta,candles,features:this._features(candles)}; }); }
+  _buildSurveys(){ return this._surveyScenarios().map((sc,i)=>{ const candles=this._stampCandles(this._genScenarioCandles(3000+i*193,this._marketBase(sc.market),sc.phases),sc.tf,i*7); const {phases,...meta}=sc; return {...meta,candles,features:this._features(candles)}; }); }
   _strategyDecide(f,holding,pnl){ const p=this._codeParams; if(!holding && f.rsi14<p.rsiBuy && f.vol_ratio>p.volBuy) return 'BUY'; if(holding && (f.rsi14>p.rsiSell || pnl>p.pnlTake || pnl<p.pnlStop)) return 'SELL'; return 'HOLD'; }
-  _runBacktestData(){ const c=this._genCandles(2298,120,0.0006,this._marketBase('KRW-BTC')); const cl=c.map(x=>x.c); let holding=false,entry=0,equity=1; const eq=[],bh=[],mk=[],tr=[]; const p0=cl[0]; for(let i=20;i<c.length;i++){ const f=this._featuresAt(c,i); const pnl=holding?(cl[i]-entry)/entry*100:0; const a=this._strategyDecide(f,holding,pnl); if(a==='BUY'&&!holding){ holding=true; entry=cl[i]; mk.push({i,type:'BUY'}); } else if(a==='SELL'&&holding){ const r=(cl[i]-entry)/entry; tr.push(r); equity*=(1+r); mk.push({i,type:'SELL'}); holding=false; } const cur=holding?equity*(cl[i]/entry):equity; eq.push(cur); bh.push(cl[i]/p0); } if(holding){ const r=(cl[cl.length-1]-entry)/entry; tr.push(r); equity*=(1+r); } const fin=eq[eq.length-1]; const tot=(fin-1)*100; const bhr=(bh[bh.length-1]-1)*100; const wins=tr.filter(x=>x>0).length; const wr=tr.length?wins/tr.length*100:0; let peak=-1e9,mdd=0; eq.forEach(v=>{ if(v>peak)peak=v; const dd=(v-peak)/peak; if(dd<mdd)mdd=dd; }); return {candles:c,markers:mk,eq,bh,metrics:{totalReturn:tot,bhReturn:bhr,winRate:wr,trades:tr.length,mdd:mdd*100,vsBH:tot-bhr}}; }
+  _resolveBacktestRange(c,startDate,endDate){
+    const first=dateOnly(c[0]?.t),last=dateOnly(c[c.length-1]?.t);
+    const start=startDate||first,end=endDate||last;
+    if(start>end) throw new Error('백테스트 시작일이 종료일보다 늦습니다.');
+    if(start<first || end>last) throw new Error('선택한 날짜가 수집된 최근 1년 범위를 벗어났습니다. 사용 가능 범위: '+first+' ~ '+last);
+    const startIndex=c.findIndex(x=>dateOnly(x.t)>=start);
+    let endIndex=-1;
+    for(let i=c.length-1;i>=0;i--){ if(dateOnly(c[i].t)<=end){ endIndex=i; break; } }
+    if(startIndex<0||endIndex<startIndex) throw new Error('선택한 날짜 범위에 적용할 일봉 데이터가 없습니다.');
+    return {start,end,startIndex,endIndex};
+  }
+  _runBacktestData(c,market,range={}){ const {start,end,startIndex,endIndex}=this._resolveBacktestRange(c,range.startDate,range.endDate); const cl=c.map(x=>x.c); let holding=false,entry=0,equity=1; const eq=[],bh=[],mk=[],tr=[]; const p0=cl[startIndex]; for(let i=startIndex;i<=endIndex;i++){ const f=this._featuresAt(c,i); const pnl=holding?(cl[i]-entry)/entry*100:0; const a=this._strategyDecide(f,holding,pnl); if(a==='BUY'&&!holding){ holding=true; entry=cl[i]; mk.push({i:i-startIndex,type:'BUY'}); } else if(a==='SELL'&&holding){ const r=(cl[i]-entry)/entry; tr.push(r); equity*=(1+r); mk.push({i:i-startIndex,type:'SELL'}); holding=false; } const cur=holding?equity*(cl[i]/entry):equity; eq.push(cur); bh.push(cl[i]/p0); } if(holding){ const r=(cl[endIndex]-entry)/entry; tr.push(r); equity*=(1+r); } const fin=eq[eq.length-1]||1; const tot=(fin-1)*100; const bhr=((bh[bh.length-1]||1)-1)*100; const wins=tr.filter(x=>x>0).length; const wr=tr.length?wins/tr.length*100:0; let peak=-1e9,mdd=0; eq.forEach(v=>{ if(v>peak)peak=v; const dd=(v-peak)/peak; if(dd<mdd)mdd=dd; }); const chartCandles=c.slice(startIndex,endIndex+1),rangeKey=market+':'+start+':'+end+':'+startIndex+'-'+endIndex; return {rangeKey,candles:chartCandles,markers:mk,eq,bh,summary:{market,rangeKey,fullCandleCount:c.length,rangeCandleCount:chartCandles.length,dataFrom:c[0]?.t,dataTo:c[c.length-1]?.t,from:chartCandles[0]?.t,to:chartCandles[chartCandles.length-1]?.t,requestedFrom:start,requestedTo:end,source:'Upbit 일봉'},metrics:{totalReturn:tot,bhReturn:bhr,winRate:wr,trades:tr.length,mdd:mdd*100,vsBH:tot-bhr}}; }
   _computeConsistency(){ const r=this.state.responses; const ids=Object.keys(r); let match=0; const mism=[]; ids.forEach(id=>{ const a=r[id].action; const s=this._strategyDecide(this.surveys[id].features,false,0); if(s===a)match++; else mism.push({survey:Number(id)+1,user:a,strat:s}); }); return {pct:ids.length?Math.round(match/ids.length*100):0,total:ids.length,match,mism}; }
   _genCode(v){ const p=this._codeParams; const n=this.doneCount(); const buys=Object.keys(this.state.responses).filter(id=>this.state.responses[id].action==='BUY').map(id=>'#'+(Number(id)+1)).join(', ')||'—'; let s='';
     s+='# Tacit Trader 자동 생성 전략  ·  v'+v+'\n';
@@ -167,6 +212,7 @@ class App extends React.Component {
     return s; }
   _highlight(code){ const R=React.createElement; const kw=new Set(['def','return','if','elif','else','and','or','not','in','None','True','False','import','for','while','is']); const fn=new Set(['decide','features','position','dict']); const lines=code.split('\n'); const out=lines.map((line,li)=>{ let parts; if(line.trim().indexOf('#')===0){ parts=[R('span',{key:'c',style:{color:'#8b949e'}},line)]; } else { parts=[]; const re=/("(?:[^"\\]|\\.)*"|#.*$|\b\d+\.?\d*\b|[A-Za-z_]\w*|\s+|[^\sA-Za-z0-9_"]+)/g; let m,k=0; while((m=re.exec(line))){ const t=m[0]; let col=null; if(t[0]==='"')col='#a5d6ff'; else if(t[0]==='#')col='#8b949e'; else if(/^\d/.test(t))col='#79c0ff'; else if(kw.has(t))col='#ff7b72'; else if(fn.has(t))col='#d2a8ff'; parts.push(col?R('span',{key:k++,style:{color:col}},t):t); } } return R('div',{key:li,style:{minHeight:'1.5em',whiteSpace:'pre'}},parts.length?parts:'\u00a0'); }); return R('pre',{style:{margin:0,fontFamily:"'JetBrains Mono', monospace",fontSize:'12.5px',lineHeight:1.5,color:'#e6edf3'}},out); }
   _kfmt(v){ if(v>=1e6) return (v/1e4).toLocaleString(undefined,{maximumFractionDigits:0})+'만'; if(v>=1000) return Math.round(v).toLocaleString(); return v.toFixed(1); }
+  _axisDateLabel(value,intraday=false){ const text=String(value||''); if(!text)return ''; if(/^\d{4}-\d{2}-\d{2}/.test(text)){ const md=text.slice(5,10).replace('-','/'),hm=text.slice(11,16); return intraday&&hm?md+' '+hm:md; } return text; }
   _candleChart(c,o){
     o=o||{}; const R=React.createElement; const ind=o.indicators||{}; const W=920,H=o.height||330,pL=12,pR=66,axisH=20,gap=8;
     const showVol=!!ind.volume,showRsi=!!ind.rsi,showMacd=!!ind.macd;
@@ -187,41 +233,45 @@ class App extends React.Component {
     if(ind.bb){ [bb.up,bb.lo].forEach(pushSeries); }
     if(ind.vwap)pushSeries(vw);
     (o.drawings||[]).forEach(d=>{ if(d.type==='hline')priceVals.push(d.price); if(d.type==='trend'){ priceVals.push(d.a.price,d.b.price); } });
+    (o.markers||[]).forEach(m=>{ if(Number.isFinite(m.price))priceVals.push(m.price); });
     if(o.pendingDrawing&&o.pendingDrawing.survey===o.surveyIndex)priceVals.push(o.pendingDrawing.price);
     let mn=Math.min.apply(null,priceVals),mx=Math.max.apply(null,priceVals),pad=(mx-mn||1)*0.06; mn-=pad; mx+=pad; const rg=(mx-mn)||1;
     const y=v=>priceTop+(1-(v-mn)/rg)*priceH, x=i=>pL+cw*(i+0.5), xAbs=i=>pL+cw*(i-start+0.5);
     const pathFor=(series,yfn)=>{ let d='',open=false; visible.forEach((_,i)=>{ const v=series[start+i]; if(!Number.isFinite(v)){ open=false; return; } d+=(open?' L ':' M ')+x(i).toFixed(1)+' '+yfn(v).toFixed(1); open=true; }); return d; };
+    // Display-only gap: keep close MA 7/25/99 lines readable without changing series values.
+    const maGapPx=Number.isFinite(o.maGapPx)?o.maGapPx:16, shiftedY=(offset)=>(v)=>y(v)+offset;
     const e=[],clipId=o.clipId||'tt-price-clip';
     e.push(R('defs',{key:'defs'},R('clipPath',{id:clipId},R('rect',{x:pL,y:priceTop,width:pw,height:priceH}))));
     for(let g=0;g<=4;g++){ const val=mn+rg*g/4,yy=y(val); e.push(R('line',{key:'pg'+g,x1:pL,x2:pL+pw,y1:yy,y2:yy,stroke:'#1a212c',strokeWidth:1})); e.push(R('text',{key:'pl'+g,x:pL+pw+7,y:yy+3,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace'},this._kfmt(val))); }
     for(let g=0;g<=4;g++){ const xx=pL+pw*g/4; e.push(R('line',{key:'vg'+g,x1:xx,x2:xx,y1:priceTop,y2:H-axisH,stroke:'#121922',strokeWidth:1})); }
     const last=visible[n-1]||c[c.length-1],lastUp=last.c>=last.o,lastColor=lastUp?'#22c55e':'#ef4444',change=(last.c-last.o)/last.o*100;
     e.push(R('text',{key:'ohlc',x:pL,y:18,fill:'#7d8794',fontSize:10,fontFamily:'JetBrains Mono, monospace'},'O '+this._kfmt(last.o)+'  H '+this._kfmt(last.h)+'  L '+this._kfmt(last.l)+'  C '+this._kfmt(last.c)+'  '+(change>=0?'+':'')+change.toFixed(2)+'%'));
-    let lx=pL+390; const addLegend=(key,label,color,series)=>{ const v=series?series[c.length-1]:null,txt=label+(Number.isFinite(v)?' '+this._kfmt(v):''); e.push(R('text',{key,x:lx,y:18,fill:color,fontSize:10,fontFamily:'JetBrains Mono, monospace',fontWeight:700},txt)); lx+=Math.max(54,txt.length*6.3); };
+    let lx=pL+390; const addLegend=(key,label,color,series)=>{ const v=series?series[c.length-1]:null,txt=label+(Number.isFinite(v)?' '+this._kfmt(v):''); e.push(R('text',{key,x:lx,y:18,fill:color,fontSize:10,fontFamily:'JetBrains Mono, monospace',fontWeight:700},txt)); lx+=Math.max(72,txt.length*7.1); };
     if(ind.maBinance){ addLegend('lma7','MA7','#f0b90b',ma7); addLegend('lma25','MA25','#d946ef',ma25); addLegend('lma99','MA99','#38bdf8',ma99); }
     if(ind.maClassic){ addLegend('lma20','MA20','#f97316',ma20); addLegend('lma30','MA30','#a78bfa',ma30); addLegend('lma60','MA60','#14b8a6',ma60); addLegend('lma120','MA120','#94a3b8',ma120); }
     visible.forEach((d,i)=>{ const up=d.c>=d.o,col=up?'#22c55e':'#ef4444',xx=x(i); e.push(R('line',{key:'w'+i,x1:xx,x2:xx,y1:y(d.h),y2:y(d.l),stroke:col,strokeWidth:1,clipPath:'url(#'+clipId+')'})); const bw=Math.max(2,cw*0.58),yo=y(d.o),yc=y(d.c); e.push(R('rect',{key:'b'+i,x:xx-bw/2,y:Math.min(yo,yc),width:bw,height:Math.max(1,Math.abs(yc-yo)),fill:col,rx:0.8,clipPath:'url(#'+clipId+')'})); });
-    const addPath=(key,series,color,w,dash)=>{ const d=pathFor(series,y); if(d)e.push(R('path',{key,d,fill:'none',stroke:color,strokeWidth:w||1.4,strokeDasharray:dash||'',strokeLinecap:'round',strokeLinejoin:'round',clipPath:'url(#'+clipId+')'})); };
+    const addPath=(key,series,color,w,dash,yfn=y)=>{ const d=pathFor(series,yfn); if(d)e.push(R('path',{key,d,fill:'none',stroke:color,strokeWidth:w||1.4,strokeDasharray:dash||'',strokeLinecap:'round',strokeLinejoin:'round',clipPath:'url(#'+clipId+')'})); };
     const area=(u,l)=>{ const pts=[]; visible.forEach((_,i)=>{ const a=u[start+i],b=l[start+i]; if(Number.isFinite(a)&&Number.isFinite(b))pts.push({i,a,b}); }); if(pts.length>1){ const top=pts.map(p=>(p===pts[0]?'M':'L')+x(p.i).toFixed(1)+' '+y(p.a).toFixed(1)).join(' '); const bot=pts.slice().reverse().map(p=>'L'+x(p.i).toFixed(1)+' '+y(p.b).toFixed(1)).join(' '); e.push(R('path',{key:'bbfill',d:top+' '+bot+' Z',fill:'#f0b90b14',stroke:'none',clipPath:'url(#'+clipId+')'})); } };
     if(ind.bb){ area(bb.up,bb.lo); addPath('bbup',bb.up,'#f0b90b',1,'4 4'); addPath('bbmid',bb.mid,'#a3e635',1.1,''); addPath('bblo',bb.lo,'#f0b90b',1,'4 4'); }
     if(ind.vwap)addPath('vwap',vw,'#60a5fa',1.6,'3 3');
     if(ind.maClassic){ addPath('ma20',ma20,'#f97316'); addPath('ma30',ma30,'#a78bfa'); addPath('ma60',ma60,'#14b8a6'); addPath('ma120',ma120,'#94a3b8'); }
-    if(ind.maBinance){ addPath('ma7',ma7,'#f0b90b',1.5); addPath('ma25',ma25,'#d946ef',1.5); addPath('ma99',ma99,'#38bdf8',1.5); }
+    if(ind.maBinance){ addPath('ma7',ma7,'#f0b90b',1.8,'',shiftedY(-maGapPx)); addPath('ma25',ma25,'#d946ef',1.8); addPath('ma99',ma99,'#38bdf8',1.8,'',shiftedY(maGapPx)); }
     const yy=y(last.c); e.push(R('line',{key:'lastline',x1:pL,x2:pL+pw,y1:yy,y2:yy,stroke:lastColor,strokeWidth:1,strokeDasharray:'5 4',opacity:.75})); e.push(R('rect',{key:'lastbox',x:pL+pw+5,y:yy-9,width:58,height:18,rx:4,fill:lastColor+'22',stroke:lastColor,strokeWidth:.8})); e.push(R('text',{key:'lasttxt',x:pL+pw+10,y:yy+3,fill:lastColor,fontSize:9,fontFamily:'JetBrains Mono, monospace',fontWeight:700},this._kfmt(last.c)));
     (o.drawings||[]).forEach((d,i)=>{ if(d.type==='hline'){ const py=y(d.price); e.push(R('line',{key:'dh'+i,x1:pL,x2:pL+pw,y1:py,y2:py,stroke:d.color,strokeWidth:1.6,strokeDasharray:'6 5',clipPath:'url(#'+clipId+')'})); e.push(R('text',{key:'dht'+i,x:pL+pw-2,y:py-5,fill:d.color,fontSize:9,fontFamily:'JetBrains Mono, monospace',textAnchor:'end'},this._kfmt(d.price))); } else if(d.type==='trend'){ e.push(R('line',{key:'dt'+i,x1:xAbs(d.a.i),y1:y(d.a.price),x2:xAbs(d.b.i),y2:y(d.b.price),stroke:d.color,strokeWidth:2,strokeLinecap:'round',clipPath:'url(#'+clipId+')'})); } });
     if(o.pendingDrawing&&o.pendingDrawing.survey===o.surveyIndex){ const pi=o.pendingDrawing.i-start; if(pi>=0&&pi<n)e.push(R('circle',{key:'pending',cx:x(pi),cy:y(o.pendingDrawing.price),r:4,fill:'#f0b90b',stroke:'#0a0e14',strokeWidth:1.5})); }
-    (o.markers||[]).forEach((m,k)=>{ const li=m.i-start; if(li<0||li>=n||!c[m.i])return; const buy=m.type==='BUY',py=buy?y(c[m.i].l)+13:y(c[m.i].h)-13,col=buy?'#22c55e':'#ef4444',dir=buy?1:-1,xx=x(li); e.push(R('path',{key:'m'+k,d:'M '+xx+' '+(py-6*dir)+' L '+(xx-5)+' '+(py+2*dir)+' L '+(xx+5)+' '+(py+2*dir)+' Z',fill:col,stroke:'#0a0e14',strokeWidth:0.8})); });
+    (o.markers||[]).forEach((m,k)=>{ const idx=Number.isFinite(m.i)?m.i:(m.t?c.findIndex(d=>d.t===m.t):-1),li=idx-start; if(li<0||li>=n||!c[idx])return; const buy=m.type==='BUY',col=buy?'#22c55e':'#ef4444',dir=buy?1:-1,xx=x(li),base=Number.isFinite(m.price)?m.price:(buy?c[idx].l:c[idx].h),py=Math.max(priceTop+12,Math.min(priceBottom-12,buy?y(base)+13:y(base)-13)); e.push(R('path',{key:'m'+k,d:'M '+xx+' '+(py-6*dir)+' L '+(xx-5)+' '+(py+2*dir)+' L '+(xx+5)+' '+(py+2*dir)+' Z',fill:col,stroke:'#0a0e14',strokeWidth:0.8})); if(m.label)e.push(R('text',{key:'ml'+k,x:xx,y:py+(buy?16:-10),fill:col,fontSize:9,fontFamily:'JetBrains Mono, monospace',fontWeight:800,textAnchor:'middle'},m.label)); });
     let panelTop=priceBottom+gap;
     const panel=(key,h,label)=>{ const top=panelTop; panelTop+=h+gap; e.push(R('line',{key:key+'sep',x1:pL,x2:pL+pw,y1:top,y2:top,stroke:'#1f2630'})); e.push(R('text',{key:key+'lab',x:pL,y:top+12,fill:'#7d8794',fontSize:9,fontFamily:'JetBrains Mono, monospace',fontWeight:700},label)); return {top,h,bottom:top+h}; };
     if(showVol){ const p=panel('vol',54,'VOL'),mxv=Math.max.apply(null,visible.map(d=>d.v))||1; visible.forEach((d,i)=>{ const bh=d.v/mxv*(p.h-16),col=d.c>=d.o?'#22c55e66':'#ef444466'; e.push(R('rect',{key:'vol'+i,x:x(i)-Math.max(1,cw*.28),y:p.bottom-bh,width:Math.max(1,cw*.56),height:bh,fill:col})); }); e.push(R('text',{key:'volmax',x:pL+pw+7,y:p.top+12,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace'},this._kfmt(mxv))); }
     if(showRsi){ const p=panel('rsi',58,'RSI 14'),yr=v=>p.top+(1-v/100)*p.h; [70,30].forEach((v,i)=>e.push(R('line',{key:'rsig'+i,x1:pL,x2:pL+pw,y1:yr(v),y2:yr(v),stroke:'#26303d',strokeDasharray:'4 4'}))); const d=pathFor(rs,yr); if(d)e.push(R('path',{key:'rsip',d,fill:'none',stroke:'#f0b90b',strokeWidth:1.5})); e.push(R('text',{key:'rsiv',x:pL+pw+7,y:yr(rs[c.length-1]||50)+3,fill:'#f0b90b',fontSize:9,fontFamily:'JetBrains Mono, monospace'},(rs[c.length-1]||50).toFixed(0))); }
     if(showMacd){ const p=panel('macd',64,'MACD'),vals=visible.flatMap((_,i)=>[macd[start+i],sig[start+i],hist[start+i]]).filter(Number.isFinite),mxm=Math.max.apply(null,vals.map(v=>Math.abs(v)))||1,y0=p.top+p.h/2,ym=v=>y0-v/mxm*(p.h/2-8); e.push(R('line',{key:'macdz',x1:pL,x2:pL+pw,y1:y0,y2:y0,stroke:'#26303d'})); visible.forEach((_,i)=>{ const v=hist[start+i]||0,col=v>=0?'#22c55e88':'#ef444488'; e.push(R('rect',{key:'hist'+i,x:x(i)-Math.max(1,cw*.24),y:Math.min(y0,ym(v)),width:Math.max(1,cw*.48),height:Math.max(1,Math.abs(ym(v)-y0)),fill:col})); }); const md=pathFor(macd,ym),sd=pathFor(sig,ym); if(md)e.push(R('path',{key:'macdp',d:md,fill:'none',stroke:'#38bdf8',strokeWidth:1.4})); if(sd)e.push(R('path',{key:'macds',d:sd,fill:'none',stroke:'#f97316',strokeWidth:1.2})); }
-    for(let g=0;g<=4;g++){ const li=Math.min(n-1,Math.round((n-1)*g/4)),xx=x(li); e.push(R('text',{key:'xl'+g,x:xx,y:H-6,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace',textAnchor:'middle'},String(start+li+1))); }
+    const intraday=o.intraday??chartNeedsTime(visible);
+    for(let g=0;g<=4;g++){ const li=Math.min(n-1,Math.round((n-1)*g/4)),xx=x(li),label=this._axisDateLabel(visible[li]?.t,intraday); e.push(R('text',{key:'xl'+g,x:xx,y:H-6,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace',textAnchor:'middle'},label)); }
     const drawMode=!!o.onChartClick&&o.tool&&o.tool!=='cursor';
     const click=drawMode?(ev)=>{ const r=ev.currentTarget.getBoundingClientRect(),sx=(ev.clientX-r.left)/r.width*W,sy=(ev.clientY-r.top)/r.height*H; if(sx<pL||sx>pL+pw||sy<priceTop||sy>priceBottom)return; const li=Math.max(0,Math.min(n-1,Math.round((sx-pL)/cw-.5))),py=Math.max(priceTop,Math.min(priceBottom,sy)),price=mn+(1-(py-priceTop)/priceH)*rg; o.onChartClick({i:start+li,price}); }:undefined;
-    return R('svg',{viewBox:'0 0 '+W+' '+H,onClick:click,style:{width:'100%',height:'auto',display:'block',cursor:drawMode?'crosshair':'default',touchAction:'manipulation',userSelect:'none'}},e);
+    return R('svg',{key:o.chartKey||undefined,viewBox:'0 0 '+W+' '+H,onClick:click,style:{width:'100%',height:'auto',display:'block',cursor:drawMode?'crosshair':'default',touchAction:'manipulation',userSelect:'none'}},e);
   }
-  _equityChart(st,bh,A){ const R=React.createElement; const W=820,H=230,pT=12,pB=22,pL=10,pR=46; const all=st.concat(bh),mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),rg=(mx-mn)||1; const pw=W-pL-pR,ph=H-pT-pB,n=st.length; const x=i=>pL+pw*(i/(n-1||1)); const y=v=>pT+(1-(v-mn)/rg)*ph; const path=a=>a.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' '); const e=[]; for(let g=0;g<=3;g++){ const val=mn+rg*g/3,yy=y(val); e.push(R('line',{key:'g'+g,x1:pL,x2:pL+pw,y1:yy,y2:yy,stroke:'#1a212c'})); e.push(R('text',{key:'t'+g,x:pL+pw+6,y:yy+3,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace'},((val-1)*100).toFixed(0)+'%')); } const yb=y(1); e.push(R('line',{key:'b',x1:pL,x2:pL+pw,y1:yb,y2:yb,stroke:'#2a3340',strokeDasharray:'3 3'})); e.push(R('path',{key:'bh',d:path(bh),fill:'none',stroke:'#5a6472',strokeWidth:1.5})); e.push(R('path',{key:'ar',d:path(st)+' L '+x(n-1).toFixed(1)+' '+(pT+ph).toFixed(1)+' L '+x(0).toFixed(1)+' '+(pT+ph).toFixed(1)+' Z',fill:A+'1f'})); e.push(R('path',{key:'st',d:path(st),fill:'none',stroke:A,strokeWidth:2})); return R('svg',{viewBox:'0 0 '+W+' '+H,style:{width:'100%',height:'auto',display:'block'}},e); }
+  _equityChart(st,bh,A,dates=[],chartKey=''){ const R=React.createElement; const W=820,H=230,pT=12,pB=30,pL=10,pR=46; const all=st.concat(bh),mn=Math.min.apply(null,all),mx=Math.max.apply(null,all),rg=(mx-mn)||1; const pw=W-pL-pR,ph=H-pT-pB,n=st.length; const x=i=>pL+pw*(i/(n-1||1)); const y=v=>pT+(1-(v-mn)/rg)*ph; const path=a=>a.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' '); const e=[]; for(let g=0;g<=3;g++){ const val=mn+rg*g/3,yy=y(val); e.push(R('line',{key:'g'+g,x1:pL,x2:pL+pw,y1:yy,y2:yy,stroke:'#1a212c'})); e.push(R('text',{key:'t'+g,x:pL+pw+6,y:yy+3,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace'},((val-1)*100).toFixed(0)+'%')); } const yb=y(1); e.push(R('line',{key:'b',x1:pL,x2:pL+pw,y1:yb,y2:yb,stroke:'#2a3340',strokeDasharray:'3 3'})); e.push(R('path',{key:'bh',d:path(bh),fill:'none',stroke:'#5a6472',strokeWidth:1.5})); e.push(R('path',{key:'ar',d:path(st)+' L '+x(n-1).toFixed(1)+' '+(pT+ph).toFixed(1)+' L '+x(0).toFixed(1)+' '+(pT+ph).toFixed(1)+' Z',fill:A+'1f'})); e.push(R('path',{key:'st',d:path(st),fill:'none',stroke:A,strokeWidth:2})); for(let g=0;g<=4;g++){ const i=Math.min(n-1,Math.round((n-1)*g/4)),label=this._axisDateLabel(dates[i]?.t||dates[i],false); e.push(R('text',{key:'xl'+g,x:x(i),y:H-7,fill:'#5a6472',fontSize:9,fontFamily:'JetBrains Mono, monospace',textAnchor:'middle'},label)); } return R('svg',{key:chartKey||undefined,viewBox:'0 0 '+W+' '+H,style:{width:'100%',height:'auto',display:'block'}},e); }
   _now(){ return new Date().toTimeString().slice(0,8); }
   doneCount(){ return Object.keys(this.state.responses).length; }
   fillDemo(){ const r={}; this.surveys.forEach((sv,i)=>{ const f=sv.features; let a,t; if(f.rsi14<38){ a='BUY'; t='RSI '+f.rsi14.toFixed(0)+'로 과매도인데 거래량 '+f.vol_ratio.toFixed(1)+'x 터져서 반등 노리고 분할 매수.'; } else if(f.rsi14>62){ a='SELL'; t='RSI '+f.rsi14.toFixed(0)+' 과열에 고점 부담이라 일부 익절.'; } else { a='HOLD'; t='방향 애매하고 '+f.ma_align+' 구간이라 일단 관망.'; } r[i]={action:a,reason:t,time:this._now()}; }); this.setState({responses:r}); }
@@ -247,10 +297,48 @@ class App extends React.Component {
   runCodify=()=>{ if(this.state.codifying||this.doneCount()===0)return; this.setState({codifying:true}); setTimeout(()=>{ const v=(this.state.strategy?this.state.strategy.version:0)+1; const code=this._genCode(v); const cons=this._computeConsistency(); const cnt=this.doneCount(); this.setState(s=>({codifying:false,strategy:{version:v,code},consistency:cons,backtest:null,versions:[{version:v,label:'초기 코드화 · 응답 '+cnt+'건',time:this._now()},...s.versions]})); },1500); };
   onCorrection=(e)=>this.setState({correctionDraft:e.target.value});
   runRefine=()=>{ const t=this.state.correctionDraft.trim(); if(!t||this.state.codifying||!this.state.strategy)return; const p={...this._codeParams}; if(/손절|stop|빠르|리스크|보수/.test(t)) p.pnlStop=Math.min(-2,p.pnlStop+1); else if(/거래량|volume|볼륨|엄격/.test(t)) p.volBuy=Math.round((p.volBuy+0.2)*100)/100; else if(/익절|목표|수익|길게|버티|버텨/.test(t)) p.pnlTake=p.pnlTake+1.5; else if(/과매도|rsi|민감|덜|공격/.test(t)) p.rsiBuy=Math.min(45,p.rsiBuy+3); else p.rsiBuy=Math.min(45,p.rsiBuy+2); p.extra=[...p.extra,t]; this._codeParams=p; this.setState({codifying:true}); setTimeout(()=>{ const v=this.state.strategy.version+1; const code=this._genCode(v); const cons=this._computeConsistency(); this.setState(s=>({codifying:false,correctionDraft:'',strategy:{version:v,code},consistency:cons,backtest:null,versions:[{version:v,label:'정제: '+(t.length>20?t.slice(0,20)+'…':t),time:this._now()},...s.versions]})); },1400); };
-  runBacktest=()=>{ if(this.state.backtesting||!this.state.strategy)return; this.setState({backtesting:true}); setTimeout(()=>{ this.setState({backtesting:false,backtest:this._runBacktestData()}); },1500); };
+  onBacktestMarket=(e)=>this.setState({backtestMarketDraft:e.target.value.toUpperCase(),backtestError:''});
+  setBacktestMarket=(market)=>this.setState({backtestMarket:market,backtestMarketDraft:market,backtest:null,backtestError:''});
+  onBacktestStartDate=(e)=>this.setState({backtestStartDate:e.target.value,backtest:null,backtestError:''});
+  onBacktestEndDate=(e)=>this.setState({backtestEndDate:e.target.value,backtest:null,backtestError:''});
+  runBacktest=async()=>{ if(this.state.backtesting||!this.state.strategy)return; const market=normalizeUpbitMarket(this._backtestMarketInput.current?.value||this.state.backtestMarketDraft); const range={startDate:this._backtestStartInput.current?.value||this.state.backtestStartDate,endDate:this._backtestEndInput.current?.value||this.state.backtestEndDate}; this.setState({backtesting:true,backtestError:'',backtestMarket:market,backtestMarketDraft:market,backtestStartDate:range.startDate,backtestEndDate:range.endDate}); try{ const candles=this._backtestCandleCache[market]||(this._backtestCandleCache[market]=await fetchUpbitDailyCandles(market,365)); if(this._unmounted)return; this.setState({backtesting:false,backtest:this._runBacktestData(candles,market,range),backtestError:''}); }catch(error){ if(this._unmounted)return; this.setState({backtesting:false,backtestError:error?.message||'업비트 데이터를 가져오지 못했습니다.'}); } };
+  onMonitorMarket=(e)=>this.setState({monitorMarketDraft:e.target.value.toUpperCase(),monitorError:''});
+  onMonitorMarketKeyDown=(e)=>{ if(e.key==='Enter') this.applyMonitorMarket(); };
+  applyMonitorMarket=()=>this.setMonitorMarket(this.state.monitorMarketDraft);
+  setMonitorMarket=(value)=>{
+    const market=normalizeUpbitMarket(value);
+    this._mon={holding:false,entry:0};
+    this._openReal=false;
+    if(market===this.state.monitorMarket){
+      this.setState({monitorMarketDraft:market,monitorError:''},()=>this._pollSignal());
+      return;
+    }
+    this.setState({
+      monitorMarket:market,
+      monitorMarketDraft:market,
+      wsConnected:false,
+      signal:'HOLD',
+      signalReason:'새 종목 데이터 수신 대기',
+      alerts:[],
+      monitorError:'',
+      lastCandleTime:'',
+      monitorCandles:[],
+      monitorMarkers:[],
+    },()=>{ this._connectWs(); this._pollSignal(); });
+  };
   onWebhook=(e)=>this.setState({webhookDraft:e.target.value});
   enableNotifications=()=>{ requestNotifyPermission().then(p=>this.setState({notifPerm:p})); };
   testAlert=()=>this.sendTestAlert();
+  markMonitorDecision=(type)=>{
+    const candles=this.state.monitorCandles;
+    const last=candles[candles.length-1];
+    if(!last)return;
+    const action=type==='SELL'?'SELL':'BUY';
+    const price=Math.round(this.state.price||last.c);
+    const marker={id:Date.now(),type:action,label:action==='BUY'?'B':'S',market:this.state.monitorMarket,t:last.t,price,time:this._now()};
+    this.setState(s=>({monitorMarkers:[...s.monitorMarkers,marker].slice(-40)}));
+  };
+  clearMonitorMarkers=()=>this.setState({monitorMarkers:[]});
 
   renderVals(){
     const s=this.state; const A=this.props.accent||'#4f8cff';
@@ -261,6 +349,11 @@ class App extends React.Component {
     const actStyle=k=>{ const map={BUY:'#22c55e',SELL:'#ef4444',HOLD:'#f59e0b'}; const col=map[k]; const b='flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:14px;border-radius:10px;cursor:pointer;transition:all .12s;font-weight:700;'; return s.draftAction===k? b+'border:1.5px solid '+col+';background:'+col+'1f;color:'+col+';' : b+'border:1.5px solid #1f2630;background:#0e131b;color:#8b95a3;'; };
     const subOk=!!s.draftAction&&!!s.draftReason.trim();
     const chip=(active,tone)=>({display:'inline-flex',alignItems:'center',justifyContent:'center',gap:6,minHeight:28,padding:'0 9px',borderRadius:7,border:'1px solid '+(active?(tone||A):'#1f2630'),background:active?((tone||A)+'24'):'#0e131b',color:active?'#e6edf3':'#8b95a3',fontSize:11.5,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'});
+    const backtestMarket=normalizeUpbitMarket(s.backtestMarketDraft);
+    const quickBacktestMarkets=['KRW-BTC','KRW-ETH','KRW-SOL','KRW-XRP','KRW-DOGE'].map(m=>({market:m,onClick:()=>this.setBacktestMarket(m),style:chip(backtestMarket===m,'#4f8cff')}));
+    const monitorMarket=normalizeUpbitMarket(s.monitorMarketDraft);
+    const quickMonitorMarkets=['KRW-BTC','KRW-ETH','KRW-SOL','KRW-XRP','KRW-DOGE'].map(m=>({market:m,onClick:()=>this.setMonitorMarket(m),style:chip(s.monitorMarket===m,'#22c55e')}));
+    const monitorDecisionBtn=(tone,disabled=false)=>'border:1px solid '+(disabled?'#1f2630':tone)+';background:'+(disabled?'#0e131b':tone+'1f')+';color:'+(disabled?'#5a6472':tone)+';border-radius:8px;padding:9px 13px;font-size:12.5px;font-weight:800;cursor:'+(disabled?'not-allowed':'pointer')+';white-space:nowrap;';
     const rangeOptions=[20,30,60,120].map(n=>({label:n+rangeUnit,value:n,onClick:()=>this.setChartRange(n),style:chip(s.chartRange===n,'#f0b90b')}));
     const indicatorMeta=[
       {key:'maBinance',label:'MA 7/25/99',tone:'#f0b90b'},
@@ -293,6 +386,9 @@ class App extends React.Component {
     ].map(r=>({label:r.label,value:r.value,color:r.tone==='u'?'#22c55e':r.tone==='d'?'#ef4444':'#aeb7c2'}));
     const ctx=Object.keys(s.responses).map(id=>({survey:'#'+(Number(id)+1),action:s.responses[id].action,color:actColor(s.responses[id].action),reason:s.responses[id].reason,time:s.responses[id].time}));
     const bt=s.backtest; const cons=s.consistency;
+    const backtestRangeText=(s.backtestStartDate||'-')+' ~ '+(s.backtestEndDate||'-');
+    const backtestMetaText=bt?.summary ? (bt.summary.market+' · 수집 '+dateOnly(bt.summary.dataFrom)+' ~ '+dateOnly(bt.summary.dataTo)+' ('+bt.summary.fullCandleCount+'개) · 적용 '+dateOnly(bt.summary.from)+' ~ '+dateOnly(bt.summary.to)+' ('+bt.summary.rangeCandleCount+'개 일봉)') : (backtestMarket+' · 최근 1년 수집 후 '+backtestRangeText+' 적용');
+    const monitorMarkerItems=s.monitorMarkers.slice().reverse().map(m=>{ const pnl=m.price?((m.type==='BUY'?(s.price-m.price):(m.price-s.price))/m.price*100):0; return {id:m.id,type:m.type,label:m.type==='BUY'?'매수':'매도',color:m.type==='BUY'?'#22c55e':'#ef4444',price:m.price.toLocaleString(),time:m.time,date:this._axisDateLabel(m.t,true),pnlText:(pnl>=0?'+':'')+pnl.toFixed(2)+'%',pnlColor:pnl>=0?'#22c55e':'#ef4444'}; });
     let metricCards=[];
     if(bt){ const m=bt.metrics; metricCards=[
       {label:'총 수익률',value:(m.totalReturn>=0?'+':'')+m.totalReturn.toFixed(1)+'%',color:m.totalReturn>=0?'#22c55e':'#ef4444',sub:'전략 누적'},
@@ -303,6 +399,16 @@ class App extends React.Component {
     const brandBtn=(disabled,wait)=>{ const b='border:none;border-radius:10px;padding:13px;font-weight:700;font-size:14px;width:100%;transition:all .12s;'; if(wait)return b+'background:#1a212c;color:#9aa4b1;cursor:wait;'; if(disabled)return b+'background:#1a212c;color:#5a6472;cursor:not-allowed;'; return b+'background:linear-gradient(90deg,'+A+',#22c55e);color:#06101f;cursor:pointer;'; };
     return {
       wsConnected:s.wsConnected,
+      wsStatusText:s.wsConnected?'업비트 시세 연결됨':'업비트 연결 중…',
+      monitorMarket:s.monitorMarket,
+      monitorMarketDraft:s.monitorMarketDraft,
+      monitorMarketPreview:monitorMarket,
+      onMonitorMarket:this.onMonitorMarket,
+      onMonitorMarketKeyDown:this.onMonitorMarketKeyDown,
+      applyMonitorMarket:this.applyMonitorMarket,
+      quickMonitorMarkets,
+      monitorError:s.monitorError,
+      lastCandleTime:s.lastCandleTime,
       livePriceFmt:s.price.toLocaleString(),
       topPriceColor:s.price>=s.prevPrice?'#22c55e':'#ef4444',
       navSurveyStyle:nav('survey'),navStrategyStyle:nav('strategy'),navBacktestStyle:nav('backtest'),navMonitorStyle:nav('monitor'),navSettingsStyle:nav('settings'),
@@ -317,7 +423,7 @@ class App extends React.Component {
       clearDrawStyle:{...chip(false,'#ef4444'),opacity:drawingCount?0.95:0.55,cursor:drawingCount?'pointer':'not-allowed'},
       chartDrawCount:drawingCount,
       chartPendingText:s.pendingDrawing&&s.pendingDrawing.survey===s.surveyIndex?'추세선 1점 선택됨':'',
-      surveyChartEl:this._candleChart(cur.candles,{height:430,range:s.chartRange,indicators:s.chartIndicators,drawings:s.chartDrawings[s.surveyIndex]||[],pendingDrawing:s.pendingDrawing,surveyIndex:s.surveyIndex,tool:s.chartTool,onChartClick:this.onChartPoint,clipId:'survey-price-clip-'+s.surveyIndex}),
+      surveyChartEl:this._candleChart(cur.candles,{height:520,range:s.chartRange,indicators:s.chartIndicators,drawings:s.chartDrawings[s.surveyIndex]||[],pendingDrawing:s.pendingDrawing,surveyIndex:s.surveyIndex,tool:s.chartTool,onChartClick:this.onChartPoint,clipId:'survey-price-clip-'+s.surveyIndex,intraday:cur.tf!=='일'}),
       featureRows:fr,
       goPrev:this.goPrev,goNext:this.goNext,
       setBuy:this.setBuy,setSell:this.setSell,setHold:this.setHold,
@@ -340,6 +446,12 @@ class App extends React.Component {
       hasVersions:s.versions.length>0,versionItems:s.versions,
       btNeedStrategy:!s.strategy,
       btVersionLabel:s.strategy?('v'+s.strategy.version):'—',
+      backtestMarketDraft:s.backtestMarketDraft,onBacktestMarket:this.onBacktestMarket,backtestMarketRef:this._backtestMarketInput,
+      backtestStartDate:s.backtestStartDate,backtestEndDate:s.backtestEndDate,
+      onBacktestStartDate:this.onBacktestStartDate,onBacktestEndDate:this.onBacktestEndDate,backtestStartRef:this._backtestStartInput,backtestEndRef:this._backtestEndInput,
+      quickBacktestMarkets,
+      backtestMetaText,
+      backtestError:s.backtestError,hasBacktestError:!!s.backtestError,
       backtesting:s.backtesting,notBacktesting:!s.backtesting,
       runBacktest:this.runBacktest,
       backtestBtnStyle:'border:none;border-radius:9px;padding:11px 20px;font-weight:700;font-size:13.5px;transition:all .12s;'+(s.backtesting?'background:#1a212c;color:#9aa4b1;cursor:wait;':'background:'+A+';color:#06101f;cursor:pointer;'),
@@ -347,8 +459,8 @@ class App extends React.Component {
       showBtIdle:!!s.strategy&&!s.backtest&&!s.backtesting,
       hasBacktest:!!s.backtest,
       metricCards,
-      equityChartEl:bt?this._equityChart(bt.eq,bt.bh,A):null,
-      backtestChartEl:bt?this._candleChart(bt.candles,{markers:bt.markers,height:300}):null,
+      equityChartEl:bt?this._equityChart(bt.eq,bt.bh,A,bt.candles,bt.rangeKey):null,
+      backtestChartEl:bt?this._candleChart(bt.candles,{markers:bt.markers,height:300,intraday:false,clipId:'backtest-price-clip',chartKey:bt.rangeKey}):null,
       consistencyPct:cons?cons.pct:0,consistencyTotal:cons?cons.total:0,consistencyWidth:cons?(cons.pct+'%'):'0%',
       hasMismatch:!!cons&&cons.mism.length>0,noMismatch:!!cons&&cons.mism.length===0,mismatchItems:mism,
       monNeedStrategy:!s.strategy,
@@ -356,6 +468,16 @@ class App extends React.Component {
       signalColor:s.signal==='BUY'?'#22c55e':s.signal==='SELL'?'#ef4444':'#f59e0b',
       signalReason:s.signalReason,
       priceChangePct:(((s.price-this._open)/this._open*100)>=0?'+':'')+((s.price-this._open)/this._open*100).toFixed(2)+'%',
+      hasMonitorCandles:s.monitorCandles.length>0,
+      monitorChartEl:s.monitorCandles.length?this._candleChart(s.monitorCandles,{height:360,range:120,indicators:{maBinance:true,bb:true,volume:true},markers:s.monitorMarkers,clipId:'monitor-price-clip',intraday:true}):null,
+      markMonitorBuy:()=>this.markMonitorDecision('BUY'),
+      markMonitorSell:()=>this.markMonitorDecision('SELL'),
+      clearMonitorMarkers:this.clearMonitorMarkers,
+      monitorMarkDisabled:s.monitorCandles.length===0,
+      monitorBuyBtnStyle:monitorDecisionBtn('#22c55e',s.monitorCandles.length===0),
+      monitorSellBtnStyle:monitorDecisionBtn('#ef4444',s.monitorCandles.length===0),
+      monitorClearBtnStyle:'background:#0e131b;border:1px solid #1f2630;color:'+(s.monitorMarkers.length?'#9aa4b1':'#5a6472')+';border-radius:8px;padding:9px 12px;font-size:12px;cursor:'+(s.monitorMarkers.length?'pointer':'not-allowed')+';white-space:nowrap;',
+      monitorMarkerItems,hasMonitorMarkers:monitorMarkerItems.length>0,noMonitorMarkers:monitorMarkerItems.length===0,
       webhookDraft:s.webhookDraft,onWebhook:this.onWebhook,testAlert:this.testAlert,
       enableNotifications:this.enableNotifications,
       notifPerm:s.notifPerm,
@@ -377,7 +499,7 @@ class App extends React.Component {
         <div className="tt-main" style={css(`flex:1;display:flex;min-height:0`)}>
           <Sidebar v={v} />
           <div className="tt-scroll" style={css(`flex:1;overflow-y:auto;min-width:0`)}>
-            <div className="tt-page" style={css(`max-width:1080px;margin:0 auto;padding:26px 30px 60px`)}>
+            <div className="tt-page" style={css((v.isSurvey?'max-width:1240px;':'max-width:1080px;')+'margin:0 auto;padding:26px 30px 60px')}>
               {v.isSurvey && <SurveyTab v={v} />}
               {v.isStrategy && <StrategyTab v={v} />}
               {v.isBacktest && <BacktestTab v={v} />}
