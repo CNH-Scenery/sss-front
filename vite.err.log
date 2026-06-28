@@ -1,0 +1,87 @@
+$ vite "--" "--host" "127.0.0.1" [2mPM 1:28:21[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/components/Topbar.jsx". Does the file exist?
+[2mPM 1:28:21[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/components/Topbar.jsx". Does the file exist?
+[2mPM 1:28:21[[2mPM 1:28:21[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "react-router-dom" from "src/components/Topbar.jsx"[2mPM 1:28:21[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "react-router-dom" from "src/components/Topbar.jsx". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/uudra/OneDrive/바탕 화면/skysh 해커톤 대회/src/components/Topbar.jsx[39m:2:28
+[33m  17 |  var _s = $RefreshSig$();
+  18 |  import React from "react";
+  19 |  import { useNavigate } from "react-router-dom";
+     |                               ^
+  20 |  import { css } from "../css.js";
+  21 |  import { currentUser, logout } from "../auth.js";[39m
+      at TransformPluginContext._formatError (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49258:41)
+      at TransformPluginContext.error (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49253:16)
+      at normalizeUrl (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64307:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64439:39
+      at async Promise.all (index 4)
+      at async TransformPluginContext.transform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64366:7)
+      at async PluginContainer.transform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49099:18)
+      at async loadAndTransform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:51978:27)
+      at async viteTransformMiddleware (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%E[2mPM 1:28:22[[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/main.jsx". Does the file exist?
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Login.jsx". Does the file exist?
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Signup.jsx". Does the file exist?
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Signup.jsx". Does the file exist?
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "react-router-dom" from "src/main.jsx". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/uudra/OneDrive/바탕 화면/skysh 해커톤 대회/src/main.jsx[39m:3:55
+[33m  2  |  import React from "react";
+  3  |  import ReactDOM from "react-dom/client";
+  4  |  import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+     |                                                          ^
+  5  |  import App from "./App.jsx";
+  6  |  import Login from "./pages/Login.jsx";[39m
+      at TransformPluginContext._formatError (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49258:41)
+      at TransformPluginContext.error (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49253:16)
+      at normalizeUrl (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64307:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64439:39
+      at async Promise.all (index 3)
+      at async TransformPluginContext.transform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64366:7)
+      at async PluginContainer.transform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49099:18)
+      at async loadAndTransform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Signup.jsx". Does the file exist?
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "react-router-dom" from "src/main.jsx". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Login.jsx". Does the file exist?
+ from "react-dom/client";
+  4  |  import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+     |                                                          ^
+  5  |  import App from "./App.jsx";
+  6  |  import Login from "./pages/Login.jsx";[39m
+      at TransformPluginContext._formatError (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49258:41)
+      at TransformPluginContext.error (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49253:16)
+      at normalizeUrl (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64307:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64439:39
+      at async Promise.all (index 3)
+      at async TransformPluginContext.transform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64366:7)
+      at async PluginContainer.transform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49099:18)
+      at async loadAndTransform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:51978:27)
+      at async viteTransformMiddleware (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:62106:24)
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Signup.jsx". Does the file exist?
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/components/Topbar.jsx". Does the file exist?
+[2mPM 1:28:23[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Login.jsx". Does the file exist?
+28:22[22m [31m[1m[vite][22m[39m [31mInternal server error: Failed to resolve import "react-router-dom" from "src/main.jsx". Does the file exist?[39m
+  Plugin: [35mvite:import-analysis[39m
+  File: [36mC:/Users/uudra/OneDrive/바탕 화면/skysh 해커톤 대회/src/main.jsx[39m:3:55
+[33m  2  |  import React from "react";
+  3  |  import ReactDOM from "react-dom/client";
+  4  |  import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+     |                                                          ^
+  5  |  import App from "./App.jsx";
+  6  |  import Login from "./pages/Login.jsx";[39m
+      at TransformPluginContext._formatError (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49258:41)
+      at TransformPluginContext.error (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49253:16)
+      at normalizeUrl (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64307:23)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64439:39
+      at async Promise.all (index 3)
+      at async TransformPluginContext.transform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:64366:7)
+      at async PluginContainer.transform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:49099:18)
+      at async loadAndTransform (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:51978:27)
+      at async viteTransformMiddleware (file:///C:/Users/uudra/OneDrive/%EB%B0%94%ED%83%95%20%ED%99%94%EB%A9%B4/skysh%20%ED%95%B4%EC%BB%A4%ED%86%A4%20%EB%8C%80%ED%9A%8C/node_modules/.pnpm/vite@5.4.21/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:62106:24)
+[2mPM 1:28:22[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Signup.jsx". Does the file exist?
+[2mPM 1:28:22[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Signup.jsx". Does the file exist?
+[2mPM 1:28:22[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Signup.jsx". Does the file exist?
+[2mPM 1:28:22[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Signup.jsx". Does the file exist?
+[2mPM 1:28:22[22m [31m[1m[vite][22m[39m Pre-transform error: Failed to resolve import "react-router-dom" from "src/pages/Login.jsx". Does the file exist?

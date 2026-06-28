@@ -1,0 +1,23 @@
+Port 5173 is in use, trying another one...
+Port 5174 is in use, trying another one...
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m1279[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5175[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: u[2mPM 1:15:59[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.jsx[22m
+[2mPM 1:16:07[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Topbar.jsx[22m
+[2mPM 1:16:15[22m [36m[1m[vite][22m[3[2mPM 1:16:15[22m [36m[1m[vite][22m[39m [32mhmr update[2mPM 1:16:26[22m [36m[1m[vite][22m[3[2mPM 1:16:26[22m [36m[1m[vite][22m[39m [32mhmr up[2mPM 1:16:42[22m [36m[1m[vite][22m[3[2mPM 1:16:42[22m [36m[1m[vite][22m[39m [[2mPM 1:18:13[22m [36m[1m[vite][22m[3[2mPM 1:18:13[22m [36m[1m[vite][22m[39m [[2mPM 1:22:52[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2mPM 1:28:18[22m [36m[1m[vite][22m[3[2mPM 1:28:18[22m [36m[1m[vite][22m[39m [2mPM 1:28:18[22m [36m[1m[vite][22m[3[2mPM 1:28:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.jsx[22m
+[2mPM 1:28:18[22m [36m[1m[vite][22m[39m [32mhmr update[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Topbar.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/tabs/MonitorTab.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[3[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/tabs/MonitorTab.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/tabs/SurveyTab.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Topbar.jsx[22m
+8[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Sidebar.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/tabs/MonitorTab.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2msrc/main.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/Topbar.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/tabs/MonitorTab.jsx[22m
+[2mPM 1:28:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/tabs/SurveyTab.jsx[22m
