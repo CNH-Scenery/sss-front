@@ -105,6 +105,11 @@ export default function MonitorTab({ v }) {
                       <div style={css(`display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px`)}>
                         <div style={css(`font-weight:700;font-size:14px`)}>알림 피드</div>
                         <div style={css(`display:flex;gap:8px;align-items:center`)}>
+                          <select value={v.alertMode} onChange={v.onAlertModeChange} style={css(`background:#0e131b;border:1px solid #1f2630;color:#c2cad4;border-radius:7px;padding:7px 10px;font-size:12px;cursor:pointer`)}>
+                            {v.alertModeOptions.map((mode) => (
+                              <option key={mode.key} value={mode.key}>{mode.label}</option>
+                            ))}
+                          </select>
                           <button onClick={v.enableNotifications} disabled={v.notifDisabled} style={css(v.notifBtnStyle)}>{v.notifLabel}</button>
                           <button onClick={v.testAlert} style={css(`background:#0e131b;border:1px solid #1f2630;color:#9aa4b1;border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap`)}>테스트 알림</button>
                         </div>

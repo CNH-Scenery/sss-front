@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { css } from "../css.js";
-import { PLACEHOLDERS, normalizePayload, formatAlert } from "../alerts/alertConfig.js";
+import { ALERT_MODES, PLACEHOLDERS, normalizePayload, formatAlert } from "../alerts/alertConfig.js";
 
 const card = `background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:18px;margin-bottom:16px`;
 const label = `font-size:12.5px;color:#9aa4b1;font-weight:600;margin-bottom:7px`;
@@ -43,6 +43,7 @@ export default function SettingsTab({ v }) {
   const sample = normalizePayload({ action: "BUY", market: "KRW-BTC", price: v.samplePrice || 91383000, reason: "RSI 31 과매도 + 거래량 1.7x" });
   const preview = formatAlert(cfg, sample);
   const st = STATUS[v.backendStatus] || STATUS.off;
+  const expertMode = (cfg.alertMode || "expert") === "expert";
 
   return (
     <div>
@@ -68,11 +69,32 @@ export default function SettingsTab({ v }) {
           </div>
 
           <div style={css(card)}>
+            <div style={css(`font-weight:700;font-size:14px;margin-bottom:12px`)}>알림 스타일 모드</div>
+            <div style={css(`display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px`)}>
+              {ALERT_MODES.map((mode) => {
+                const active = (cfg.alertMode || "expert") === mode.key;
+                return (
+                  <button
+                    key={mode.key}
+                    type="button"
+                    onClick={() => set({ alertMode: mode.key })}
+                    style={css(`text-align:left;border:1px solid ${active ? "#4f8cff" : "#1f2630"};background:${active ? "rgba(79,140,255,0.12)" : "#0e131b"};color:${active ? "#e6edf3" : "#9aa4b1"};border-radius:9px;padding:12px;cursor:pointer;min-height:86px`)}
+                  >
+                    <div style={css(`font-weight:800;font-size:13.5px;margin-bottom:5px;color:${active ? "#4f8cff" : "#dfe5ec"}`)}>{mode.label}</div>
+                    <div style={css(`font-size:11.5px;line-height:1.45;color:${active ? "#b8c7dc" : "#7d8794"}`)}>{mode.description}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={css(card)}>
             <div style={css(`font-weight:700;font-size:14px;margin-bottom:12px`)}>제목·본문 템플릿</div>
+            {!expertMode && <div style={css(`font-size:11px;color:#7d8794;margin:-4px 0 12px`)}>전문가 모드에서만 직접 템플릿을 사용합니다.</div>}
             <div style={css(label)}>제목</div>
-            <input value={cfg.titleTemplate} onChange={(e) => set({ titleTemplate: e.target.value })} style={css(input + `;font-family:'JetBrains Mono',monospace;margin-bottom:12px`)} />
+            <input value={cfg.titleTemplate} disabled={!expertMode} onChange={(e) => set({ titleTemplate: e.target.value })} style={css(input + `;font-family:'JetBrains Mono',monospace;margin-bottom:12px;opacity:${expertMode ? "1" : ".55"}`)} />
             <div style={css(label)}>본문</div>
-            <input value={cfg.bodyTemplate} onChange={(e) => set({ bodyTemplate: e.target.value })} style={css(input + `;font-family:'JetBrains Mono',monospace`)} />
+            <input value={cfg.bodyTemplate} disabled={!expertMode} onChange={(e) => set({ bodyTemplate: e.target.value })} style={css(input + `;font-family:'JetBrains Mono',monospace;opacity:${expertMode ? "1" : ".55"}`)} />
             <div style={css(`font-size:11px;color:#5a6472;margin-top:9px`)}>플레이스홀더: {PLACEHOLDERS.map((p) => (
               <span key={p} style={css(`font-family:'JetBrains Mono',monospace;color:#d2a8ff;background:rgba(210,168,255,0.08);border-radius:4px;padding:1px 5px;margin-right:5px;font-size:10.5px`)}>{"{" + p + "}"}</span>
             ))}</div>

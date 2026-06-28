@@ -7,7 +7,7 @@ export default function StrategyTab({ v }) {
                 <div style={css(`margin-bottom:18px`)}>
                   <div style={css(`font-size:11px;letter-spacing:0.1em;color:#4f8cff;font-weight:700;margin-bottom:6px`)}>STEP 2 · 코드화</div>
                   <h1 style={css(`margin:0;font-size:22px;font-weight:700;letter-spacing:-0.02em`)}>전략 코드화</h1>
-                  <div style={css(`color:#7d8794;font-size:13px;margin-top:5px`)}>누적된 자연어 응답 + 지표 스냅샷에서 LLM이 임계값을 역설계해 <span style={css(`color:#d2a8ff;font-family:'JetBrains Mono',monospace`)}>decide()</span> 함수를 만듭니다.</div>
+                  <div style={css(`color:#7d8794;font-size:13px;margin-top:5px`)}>기본 5개 이상 응답한 자연어 판단 + 지표 스냅샷에서 LLM이 임계값을 역설계해 <span style={css(`color:#d2a8ff;font-family:'JetBrains Mono',monospace`)}>decide()</span> 함수를 만듭니다.</div>
                 </div>
 
                 <div style={css(`display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start`)}>
@@ -37,10 +37,11 @@ export default function StrategyTab({ v }) {
                   <div style={css(`display:flex;flex-direction:column;gap:16px;min-width:0`)}>
                     <div style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:16px`)}>
                       <div style={css(`font-weight:700;font-size:14px;margin-bottom:14px`)}>전략 생성</div>
-                      <button onClick={v.runCodify} style={css(v.codifyStyle)}>
+                      <button onClick={v.runCodify} disabled={!v.canCodify || v.codifying} style={css(v.codifyStyle)}>
                         {v.codifying && (<span><span style={css(`display:inline-block;width:14px;height:14px;border:2px solid rgba(6,16,31,.35);border-top-color:#06101f;border-radius:50%;animation:tt-spin .7s linear infinite;margin-right:8px;vertical-align:-2px`)}></span>LLM 분석 중…</span>)}
                         {v.notCodifying && (<span>{v.codifyLabel}</span>)}
                       </button>
+                      <div style={css(`font-size:12px;color:#7d8794;line-height:1.45;margin-top:10px`)}>{v.codifyHint}</div>
                     </div>
 
                     {v.hasStrategy && (

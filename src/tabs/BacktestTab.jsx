@@ -89,7 +89,12 @@ export default function BacktestTab({ v }) {
 
                         <div style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:16px;margin-bottom:16px`)}>
                           <div style={css(`display:flex;align-items:center;justify-content:space-between;margin-bottom:8px`)}>
-                            <div style={css(`font-weight:700;font-size:14px`)}>매매 시점</div>
+                            <div>
+                              <div style={css(`font-weight:700;font-size:14px`)}>매매 시점</div>
+                              {v.backtestChartHint && (
+                                <div style={css(`font-size:11.5px;color:${v.backtestChartHintColor};margin-top:3px`)}>{v.backtestChartHint}</div>
+                              )}
+                            </div>
                             <div style={css(`display:flex;gap:14px;font-size:11.5px`)}>
                               <span style={css(`color:#22c55e`)}>▲ 매수</span><span style={css(`color:#ef4444`)}>▼ 매도</span>
                             </div>

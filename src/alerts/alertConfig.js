@@ -9,9 +9,16 @@ const CONFIG_KEY = "tt_alert_config";
 
 export const ACTION_LABELS = { BUY: "매수 신호", SELL: "매도 신호", HOLD: "관망", WARN: "경고", INFO: "알림" };
 export const PLACEHOLDERS = ["action", "actionLabel", "market", "price", "reason", "time", "severity"];
+export const ALERT_MODES = [
+  { key: "expert", label: "전문가", description: "종목, 가격, 사유를 그대로 보여주는 기본 분석형 알림" },
+  { key: "weather", label: "날씨 뉴스", description: "회사에서 봐도 자연스러운 기상 속보 스타일" },
+  { key: "office", label: "업무 메모", description: "회의 자료와 일정 체크처럼 보이는 사무실 친화형" },
+  { key: "cafe", label: "카페 주문", description: "픽업 알림처럼 가볍게 확인하는 장난스러운 스타일" },
+];
 
 export const DEFAULT_CONFIG = {
   backendUrl: "",                                  // ws(s)://… 비어있으면 백엔드 소켓 비활성
+  alertMode: "expert",
   titleTemplate: "{actionLabel} · {market}",
   bodyTemplate: "{reason} · {price}원 · {time}",
   fields: { market: true, price: true, reason: true, time: true },
@@ -23,9 +30,11 @@ export const DEFAULT_CONFIG = {
 export function loadConfig() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(CONFIG_KEY)) || {}; } catch { saved = {}; }
+  const alertMode = ALERT_MODES.some((mode) => mode.key === saved.alertMode) ? saved.alertMode : DEFAULT_CONFIG.alertMode;
   return {
     ...DEFAULT_CONFIG,
     ...saved,
+    alertMode,
     fields: { ...DEFAULT_CONFIG.fields, ...(saved.fields || {}) },
     colors: { ...DEFAULT_CONFIG.colors, ...(saved.colors || {}) },
   };
@@ -99,8 +108,98 @@ export function pickColor(cfg, norm) {
   );
 }
 
+function selectedMode(cfg) {
+  return ALERT_MODES.some((mode) => mode.key === cfg.alertMode) ? cfg.alertMode : DEFAULT_CONFIG.alertMode;
+}
+
+function marketStation(market) {
+  const base = String(market || "").split("-").pop() || "A";
+  return base.slice(0, 1).toUpperCase() + " 관측소";
+}
+
+function scaledIndex(price) {
+  const n = Number(price) || 0;
+  if (!n) return "-";
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(".0", "") + "도";
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(".0", "") + "도";
+  return Math.round(n).toLocaleString() + "도";
+}
+
+const STEALTH_COPY = {
+  weather: {
+    BUY: { title: "오늘의 날씨 · 맑음 전환", body: "기압이 올라 바깥 공기가 좋아졌습니다. 산책 타이밍을 확인하세요.", status: "맑음 전환" },
+    SELL: { title: "날씨 속보 · 소나기 주의", body: "상층 기류가 거칠어졌습니다. 잠깐 실내 대기가 좋아 보입니다.", status: "소나기 주의" },
+    HOLD: { title: "생활 날씨 · 구름 많음", body: "큰 변화 없이 구름이 머무는 중입니다. 다음 관측을 기다립니다.", status: "구름 많음" },
+    WARN: { title: "기상 특보 · 확인 필요", body: "예상보다 변동이 커졌습니다. 창가 쪽 상황을 한 번 확인하세요.", status: "특보" },
+    INFO: { title: "기상 알림 · 정기 관측", body: "새 관측값이 도착했습니다. 필요할 때만 살짝 확인하세요.", status: "정기 관측" },
+  },
+  office: {
+    BUY: { title: "회의 자료 업데이트", body: "새 안건이 올라왔습니다. 가능하면 다음 액션을 검토하세요.", status: "검토 권장" },
+    SELL: { title: "일정 변경 안내", body: "마감 쪽 변수가 생겼습니다. 정리 여부를 확인하는 편이 좋습니다.", status: "정리 권장" },
+    HOLD: { title: "정기 체크 완료", body: "현재 업무 흐름은 유지 중입니다. 추가 지시 전까지 대기합니다.", status: "대기" },
+    WARN: { title: "업무 메모 · 확인 필요", body: "예외 상황이 기록됐습니다. 조용히 세부 내용을 확인하세요.", status: "확인 필요" },
+    INFO: { title: "업무 메모 도착", body: "새 메모가 기록됐습니다. 여유 있을 때 확인하세요.", status: "메모" },
+  },
+  cafe: {
+    BUY: { title: "카페 픽업 알림", body: "주문한 메뉴가 막 나왔습니다. 따뜻할 때 챙기면 좋습니다.", status: "픽업 가능" },
+    SELL: { title: "카페 주문 안내", body: "재료가 빠르게 줄고 있습니다. 주문 정리를 확인하세요.", status: "품절 임박" },
+    HOLD: { title: "카페 대기표", body: "아직 번호가 불리지 않았습니다. 조금 더 기다리면 됩니다.", status: "대기 중" },
+    WARN: { title: "카페 직원 호출", body: "주문 확인이 필요합니다. 카운터 상황을 살짝 봐주세요.", status: "확인 필요" },
+    INFO: { title: "카페 알림", body: "새 안내가 도착했습니다. 필요할 때 확인하세요.", status: "안내" },
+  },
+};
+
+function formatStealthAlert(mode, cfg, norm) {
+  const copy = (STEALTH_COPY[mode] && (STEALTH_COPY[mode][norm.action] || STEALTH_COPY[mode].INFO)) || STEALTH_COPY.weather.INFO;
+  const common = {
+    color: pickColor(cfg, norm),
+    action: norm.action,
+    mode,
+  };
+
+  if (mode === "weather") {
+    return {
+      ...common,
+      title: copy.title,
+      body: copy.body + " 발표 " + norm.time,
+      fields: [
+        { label: "지역", value: marketStation(norm.market) },
+        { label: "체감", value: scaledIndex(norm.price) },
+        { label: "상태", value: copy.status },
+      ],
+    };
+  }
+
+  if (mode === "office") {
+    return {
+      ...common,
+      title: copy.title,
+      body: copy.body + " · " + norm.time,
+      fields: [
+        { label: "문서함", value: marketStation(norm.market).replace("관측소", "폴더") },
+        { label: "상태", value: copy.status },
+        { label: "번호", value: scaledIndex(norm.price).replace("도", "") },
+      ],
+    };
+  }
+
+  return {
+    ...common,
+    title: copy.title,
+    body: copy.body + " · " + norm.time,
+    fields: [
+      { label: "픽업대", value: marketStation(norm.market).replace("관측소", "라인") },
+      { label: "상태", value: copy.status },
+      { label: "주문", value: scaledIndex(norm.price).replace("도", "") },
+    ],
+  };
+}
+
 // 설정 + 정규화된 페이로드 → 모달/알림 표시 데이터.
 export function formatAlert(cfg, norm) {
+  const mode = selectedMode(cfg);
+  if (mode !== "expert") return formatStealthAlert(mode, cfg, norm);
+
   const dict = {
     action: norm.action,
     actionLabel: norm.actionLabel,
@@ -111,15 +210,17 @@ export function formatAlert(cfg, norm) {
     severity: norm.severity,
   };
   const fields = [];
-  if (cfg.fields.market) fields.push({ label: "종목", value: norm.market });
-  if (cfg.fields.price) fields.push({ label: "가격", value: norm.priceFmt + "원" });
-  if (cfg.fields.reason) fields.push({ label: "사유", value: norm.reason || "-" });
-  if (cfg.fields.time) fields.push({ label: "시간", value: norm.time });
+  const fieldCfg = cfg.fields || DEFAULT_CONFIG.fields;
+  if (fieldCfg.market) fields.push({ label: "종목", value: norm.market });
+  if (fieldCfg.price) fields.push({ label: "가격", value: norm.priceFmt + "원" });
+  if (fieldCfg.reason) fields.push({ label: "사유", value: norm.reason || "-" });
+  if (fieldCfg.time) fields.push({ label: "시간", value: norm.time });
   return {
     title: applyTemplate(cfg.titleTemplate, dict),
     body: applyTemplate(cfg.bodyTemplate, dict),
     fields,
     color: pickColor(cfg, norm),
     action: norm.action,
+    mode,
   };
 }
