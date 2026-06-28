@@ -11,8 +11,10 @@
 //     onTool: (ev) => showToolActivity(ev),
 //   });
 
+import { API_BASE_URL } from "./base.js";
+
 export async function streamChat({ messages, onText, onTool, signal }) {
-  const res = await fetch("/api/chat/stream", {
+  const res = await fetch(`${API_BASE_URL}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages }),

@@ -6,15 +6,27 @@ import SurveyTab from "./tabs/SurveyTab.jsx";
 import StrategyTab from "./tabs/StrategyTab.jsx";
 import BacktestTab from "./tabs/BacktestTab.jsx";
 import MonitorTab from "./tabs/MonitorTab.jsx";
-import ChatTab from "./tabs/ChatTab.jsx";
 import SettingsTab from "./tabs/SettingsTab.jsx";
+import ChatWidget from "./components/ChatWidget.jsx";
 import AlertToasts from "./components/AlertToasts.jsx";
 import { notifPermission, requestNotifyPermission, sendNotification } from "./notify.js";
 import { normalizeUpbitMarket } from "./upbit.js";
-import { evaluateBackendMonitor, fetchBackendCandles, runBackendBacktest } from "./api/tradingData.js";
+import { evaluateBackendMonitor, fetchBackendCandles } from "./api/tradingData.js";
 import { ALERT_MODES, createMonitorAlertPayload, loadConfig, saveConfig, normalizePayload, formatAlert, pickColor } from "./alerts/alertConfig.js";
 import { createAlertSocket } from "./alerts/alertSocket.js";
 import { beep } from "./alerts/sound.js";
+import { generateTradingCode } from "./api/codegen.js";
+import { runBacktestApi } from "./api/backtest.js";
+import { API_BASE_URL } from "./api/base.js";
+
+// 백엔드 WebSocket URL 빌더. 배포(VITE_API_BASE_URL)면 http→ws/https→wss 로 변환,
+// 개발이면 현재 호스트(5173)로 붙어 Vite 프록시(ws:true)가 :8000 으로 전달한다.
+const backendWsUrl = (path) => {
+  const base = (API_BASE_URL || "").replace(/\/+$/, "");
+  if (base) return base.replace(/^http/, "ws") + path;
+  const loc = (typeof window !== "undefined") ? window.location : { protocol: "http:", host: "localhost:5173" };
+  return (loc.protocol === "https:" ? "wss:" : "ws:") + "//" + loc.host + path;
+};
 
 const dateOnly = (value) => String(value || "").slice(0, 10);
 const toLocalDateInput = (date) => {
@@ -71,19 +83,19 @@ class App extends React.Component {
     this._mon={holding:false,entry:0};  // 실시간 모니터링용 가상 포지션
     this.surveys=this._buildSurveys();
     this.state={ screen:'survey', surveyIndex:0, responses:{}, draftAction:null, draftReason:'',
-      strategy:null, codifying:false, versions:[], correctionDraft:'',
+      strategy:null, codifying:false, codifyError:'', versions:[], correctionDraft:'',
       backtest:null, backtesting:false, backtestError:'', backtestMarket:'KRW-BTC', backtestMarketDraft:'KRW-BTC', backtestStartDate:defaultBacktestRange.start, backtestEndDate:defaultBacktestRange.end, backtestChartSpan:'day', backtestChartCandles:[], backtestChartLoading:false, backtestChartError:'', consistency:null,
       monitorMarket:'KRW-BTC', monitorMarketDraft:'KRW-BTC', monitorError:'', lastCandleTime:'', monitorCandles:[], monitorHistoryCandles:[], monitorHistoryLoading:false, monitorChartSpan:'minute', monitorMarkers:[],
-      price:null, prevPrice:null, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false,
+      price:null, prevPrice:null, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission(), wsConnected:false, backendMonStatus:'off',
       alertConfig:loadConfig(), toasts:[], backendStatus:'off',
       precisionUnlocked:this._loadPrecisionPass(), paymentPending:false, paymentMessage:'',
       chartRange:this.surveys[0]?.candles.length||132,
       chartIndicators:{maBinance:true,maClassic:false,bb:true,vwap:false,volume:true,rsi:true,macd:false},
       chartTool:'cursor', chartDrawings:{}, pendingDrawing:null, chartViews:{} };
   }
-  componentDidMount(){ this._unmounted=false; this._poll=setInterval(this._pollSignal,4000); this._pollSignal(); this._initBackend(); if(this.props.demoMode) this.fillDemo(); }
-  componentDidUpdate(prevProps, prevState){ if(!prevProps.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); if(!prevState?.strategy && this.state.strategy) this._loadMonitorHistory(); }
-  componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); if(this._tickerSock) this._tickerSock.close(); if(this._alertSock) this._alertSock.close(); }
+  componentDidMount(){ this._unmounted=false; this._connectWs(); this._poll=setInterval(this._pollSignal,4000); this._pollSignal(); this._initBackend(); if(this.props.demoMode) this.fillDemo(); }
+  componentDidUpdate(prevProps, prevState){ if(!prevProps.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); if(!prevState?.strategy && this.state.strategy) this._loadMonitorHistory(); const cid=this.state.strategy&&this.state.strategy.codeId; const pcid=prevState&&prevState.strategy&&prevState.strategy.codeId; if(cid&&cid!==pcid) this._connectBackendMonitor(); }
+  componentWillUnmount(){ this._unmounted=true; clearInterval(this._poll); if(this._tickerSock) this._tickerSock.close(); if(this._alertSock) this._alertSock.close(); this._disconnectBackendMonitor(); }
 
   // ── 백엔드 알림 소켓 + 통합 알림 발생기 ─────────────────────────
   _initBackend(){
@@ -94,6 +106,31 @@ class App extends React.Component {
   }
   saveAlertConfig=(cfg)=>{ const prevUrl=this.state.alertConfig.backendUrl; this.setState({alertConfig:cfg},()=>{ saveConfig(cfg); if(cfg.backendUrl!==prevUrl) this._initBackend(); }); };
   setAlertMode=(alertMode)=>this.saveAlertConfig({...this.state.alertConfig,alertMode});
+
+  // ── 백엔드 실시간 모니터 소켓 (생성된 동일 코드 decide() 를 서버가 주기 실행) ──
+  _connectBackendMonitor(){
+    this._disconnectBackendMonitor();
+    const st=this.state.strategy;
+    if(!st||!st.codeId) return;
+    const market=this.state.monitorMarket;
+    const url=backendWsUrl('/api/trading-code/'+st.codeId+'/stream?market='+encodeURIComponent(market)+'&timeframe=15m&interval=15');
+    this._lastBackendAction=null;
+    this.setState({backendMonStatus:'connecting'});
+    this._backendMonSock=createAlertSocket(url, this._onBackendDecision, (stt)=>{ if(!this._unmounted) this.setState({backendMonStatus:stt}); });
+  }
+  _disconnectBackendMonitor(){ if(this._backendMonSock){ this._backendMonSock.close(); this._backendMonSock=null; } }
+  _backendMonitorActive(){ return !!(this.state.strategy && this.state.strategy.codeId); }
+  _onBackendDecision=(msg)=>{
+    if(this._unmounted || !msg) return;
+    const action=String(msg.action||'HOLD').toUpperCase();
+    const reason=msg.reason||(action==='HOLD'?'관망':'');
+    this.setState(s=>({ signal:action, signalReason:reason, ...(Number.isFinite(msg.price)?{prevPrice:Number.isFinite(s.price)?s.price:msg.price,price:msg.price}:{}) }));
+    if((action==='BUY'||action==='SELL') && action!==this._lastBackendAction){
+      const price=Number.isFinite(msg.price)?msg.price:this.state.price;
+      this._emitAlert(createMonitorAlertPayload({action,market:msg.market||this.state.monitorMarket,price,reason,features:(msg.decision&&msg.decision.indicators)||{}}));
+    }
+    this._lastBackendAction=action;
+  };
   dismissToast=(id)=>this.setState(s=>({toasts:s.toasts.filter(t=>t.id!==id)}));
   _emitAlert=(payload)=>{
     const cfg=this.state.alertConfig;
@@ -228,27 +265,50 @@ class App extends React.Component {
     if(this._unmounted || !this.state.strategy) return;
     const market=this.state.monitorMarket;
     try{
-      const result=await evaluateBackendMonitor({market,strategyParams:this._codeParams,position:this._mon});
-      if(this._unmounted || market!==this.state.monitorMarket || !Array.isArray(result.candles) || result.candles.length<20) return;
-      const c=result.candles;
-      const f=result.features||{};
-      const price=Math.round(Number(result.price)||c[c.length-1].c);
-      const action=result.signal||'HOLD';
-      const reason=result.signalReason||'Backend monitor signal received.';
-      const fired=result.fired||null;
-      this._mon=result.position||this._mon;
-      if(!this._openReal || !Number.isFinite(this._open)){ this._open=price; this._openReal=true; }
+      const useBackend=this._backendMonitorActive();
+      let c=[];
+      let price=null;
+      let lastCandleTime='';
+      let fired=null;
+      let signalPatch={};
+      if(useBackend){
+        c=await fetchBackendCandles({market,source:'minute',count:120,unit:1});
+        if(this._unmounted || market!==this.state.monitorMarket || c.length<20) return;
+        price=Math.round(Number(c[c.length-1]?.c)||0);
+        lastCandleTime=c[c.length-1]?.t||'';
+        if(!this._openReal || !Number.isFinite(this._open)){ this._open=price; this._openReal=true; }
+      } else {
+        const result=await evaluateBackendMonitor({market,strategyParams:this._codeParams,position:this._mon});
+        if(this._unmounted || market!==this.state.monitorMarket || !Array.isArray(result.candles) || result.candles.length<20) return;
+        c=result.candles;
+        const f=result.features||{};
+        price=Math.round(Number(result.price)||c[c.length-1].c);
+        lastCandleTime=result.lastCandleTime||c[c.length-1]?.t||'';
+        const action=result.signal||'HOLD';
+        const reason=result.signalReason||'Backend monitor signal received.';
+        fired=result.fired||null;
+        this._mon=result.position||this._mon;
+        if(!this._openReal || !Number.isFinite(this._open)){ this._open=price; this._openReal=true; }
+        const mon=this._mon;
+        const pnl=mon.holding ? (price-mon.entry)/mon.entry*100 : 0;
+        if(!fired){
+          const localAction=this._strategyDecide(f,mon.holding,pnl);
+          const localReason=this._signalReason(localAction,f,mon.holding);
+          if(localAction==='BUY' && !mon.holding){ mon.holding=true; mon.entry=price; fired={sig:'BUY',reason:localReason}; }
+          else if(localAction==='SELL' && mon.holding){ mon.holding=false; fired={sig:'SELL',reason:localReason}; }
+        }
+        signalPatch={signal:action,signalReason:reason};
+        if(fired) this._emitAlert(createMonitorAlertPayload({action:fired.sig,market,price,reason:fired.reason,features:f}));
+      }
       this.setState(s=>({
-        signal:action,
-        signalReason:reason,
+        ...signalPatch,
         monitorError:'',
         monitorCandles:c,
-        lastCandleTime:result.lastCandleTime||c[c.length-1]?.t||'',
+        lastCandleTime,
         prevPrice:Number.isFinite(s.price)?s.price:price,
         price,
         wsConnected:true,
       }));
-      if(fired) this._emitAlert(createMonitorAlertPayload({action:fired.sig,market,price,reason:fired.reason||reason,features:f}));
     }catch(error){
       if(!this._unmounted && market===this.state.monitorMarket) {
         this.setState({monitorError:error?.message||'업비트 모니터링 데이터를 가져오지 못했습니다.'});
@@ -516,7 +576,6 @@ class App extends React.Component {
   goStrategy=()=>this.setState({screen:'strategy'});
   goBacktest=()=>this.setState({screen:'backtest'});
   goMonitor=()=>this.setState({screen:'monitor'});
-  goChat=()=>this.setState({screen:'chat'});
   goSettings=()=>this.setState({screen:'settings'});
   _setSurvey=(i)=>{ i=Math.max(0,Math.min(9,i)); const r=this.state.responses[i]; this.setState({surveyIndex:i,draftAction:r?r.action:null,draftReason:r?r.reason:'',pendingDrawing:null}); };
   goPrev=()=>this._setSurvey(this.state.surveyIndex-1);
@@ -536,7 +595,6 @@ class App extends React.Component {
   setHold=()=>{ if(this.isCurrentSurveyLocked())return; this.setState({draftAction:'HOLD'}); };
   onReason=(e)=>{ if(this.isCurrentSurveyLocked())return; this.setState({draftReason:e.target.value}); };
   submitResponse=()=>{ if(this.isCurrentSurveyLocked())return; if(!this.state.draftAction||!this.state.draftReason.trim())return; this.setState(s=>{ const responses={...s.responses}; responses[s.surveyIndex]={action:s.draftAction,reason:s.draftReason.trim(),time:this._now()}; let nx=null; for(let k=0;k<10;k++){ if(!responses[k]){ nx=k; break; } } return {responses,surveyIndex:nx===null?s.surveyIndex:nx,draftAction:nx===null?s.draftAction:null,draftReason:nx===null?s.draftReason:''}; }); };
-  runCodify=()=>{ if(this.state.codifying||this.doneCount()<FREE_SURVEY_LIMIT)return; this.setState({codifying:true}); setTimeout(()=>{ const v=(this.state.strategy?this.state.strategy.version:0)+1; const code=this._genCode(v); const cons=this._computeConsistency(); const cnt=this.doneCount(); this.setState(s=>({codifying:false,strategy:{version:v,code},consistency:cons,backtest:null,versions:[{version:v,label:'코드화 · 응답 '+cnt+'건',time:this._now()},...s.versions]})); },1500); };
   startPrecisionCheckout=()=>{
     if(this.state.precisionUnlocked)return;
     if(PRECISION_PAYMENT_URL){
@@ -547,22 +605,50 @@ class App extends React.Component {
     this.unlockPrecisionPass();
   };
   unlockPrecisionPass=()=>{ try { localStorage.setItem(PREMIUM_UNLOCK_KEY,'true'); } catch {} this.setState({precisionUnlocked:true,paymentPending:false,paymentMessage:'정밀 인식 패스가 활성화되었습니다. 10개 설문까지 저장할 수 있어요.'}); };
+  _buildStrategyPrompt(extra){ const r=this.state.responses; const ids=Object.keys(r).sort((a,b)=>Number(a)-Number(b)); const lines=ids.map(id=>{ const resp=r[id]; const f=(this.surveys[id]&&this.surveys[id].features)||{}; const fx=['rsi14','vol_ratio','ma_align','macd','bb_pct','dist_from_high20'].map(k=>k+'='+(f[k]!==undefined&&f[k]!==null?f[k]:'?')).join(', '); return '시나리오 '+(Number(id)+1)+': 사용자 판단='+resp.action+', 이유="'+(resp.reason||'')+'", 지표('+fx+')'; }); let p='아래는 사용자가 과거 차트 시나리오에서 내린 매매 판단과 그 시점 지표입니다. 이 사용자의 매매 성향을 최대한 반영한 decide(features, position) 전략을 작성하세요.\n\n'+lines.join('\n'); if(extra) p+='\n\n[추가 수정 요청]\n'+extra; return p; }
+  _applyGenerated=(done,version,label)=>{ this.setState(s=>({codifying:false,correctionDraft:'',strategy:{version,code:done.code,codeId:done.code_id},consistency:null,backtest:null,versions:[{version,label,time:this._now()},...s.versions]})); };
+  runCodify=async()=>{ if(this.state.codifying||this.doneCount()<FREE_SURVEY_LIMIT)return; this.setState({codifying:true,codifyError:''}); const cnt=this.doneCount(); try{ const done=await generateTradingCode({prompt:this._buildStrategyPrompt(),maxIterations:4}); if(this._unmounted)return; if(!done||!done.passed){ this.setState({codifying:false,codifyError:'코드 검증 실패 — 다시 시도해 주세요.'}); return; } const v=(this.state.strategy?this.state.strategy.version:0)+1; this._applyGenerated(done,v,'초기 코드화 · 응답 '+cnt+'건'); }catch(error){ if(this._unmounted)return; this.setState({codifying:false,codifyError:error?.message||'코드 생성 실패'}); } };
   onCorrection=(e)=>this.setState({correctionDraft:e.target.value});
-  runRefine=()=>{ const t=this.state.correctionDraft.trim(); if(!t||this.state.codifying||!this.state.strategy)return; const p={...this._codeParams}; if(/손절|stop|빠르|리스크|보수/.test(t)) p.pnlStop=Math.min(-2,p.pnlStop+1); else if(/거래량|volume|볼륨|엄격/.test(t)) p.volBuy=Math.round((p.volBuy+0.2)*100)/100; else if(/익절|목표|수익|길게|버티|버텨/.test(t)) p.pnlTake=p.pnlTake+1.5; else if(/과매도|rsi|민감|덜|공격/.test(t)) p.rsiBuy=Math.min(45,p.rsiBuy+3); else p.rsiBuy=Math.min(45,p.rsiBuy+2); p.extra=[...p.extra,t]; this._codeParams=p; this.setState({codifying:true}); setTimeout(()=>{ const v=this.state.strategy.version+1; const code=this._genCode(v); const cons=this._computeConsistency(); this.setState(s=>({codifying:false,correctionDraft:'',strategy:{version:v,code},consistency:cons,backtest:null,versions:[{version:v,label:'정제: '+(t.length>20?t.slice(0,20)+'…':t),time:this._now()},...s.versions]})); },1400); };
+  runRefine=async()=>{ const t=this.state.correctionDraft.trim(); if(!t||this.state.codifying||!this.state.strategy)return; this.setState({codifying:true,codifyError:''}); try{ const done=await generateTradingCode({prompt:this._buildStrategyPrompt(t),maxIterations:4}); if(this._unmounted)return; if(!done||!done.passed){ this.setState({codifying:false,codifyError:'코드 검증 실패 — 다시 시도해 주세요.'}); return; } const v=this.state.strategy.version+1; this._applyGenerated(done,v,'정제: '+(t.length>20?t.slice(0,20)+'…':t)); }catch(error){ if(this._unmounted)return; this.setState({codifying:false,codifyError:error?.message||'코드 생성 실패'}); } };
   onBacktestMarket=(e)=>this.setState({backtestMarketDraft:e.target.value.toUpperCase(),backtestError:''});
   setBacktestMarket=(market)=>this.setState({backtestMarket:market,backtestMarketDraft:market,backtest:null,backtestError:'',backtestChartCandles:[],backtestChartError:''});
   onBacktestStartDate=(e)=>this.setState({backtestStartDate:e.target.value,backtest:null,backtestError:'',backtestChartCandles:[],backtestChartError:''});
   onBacktestEndDate=(e)=>this.setState({backtestEndDate:e.target.value,backtest:null,backtestError:'',backtestChartCandles:[],backtestChartError:''});
   runBacktest=async()=>{
     if(this.state.backtesting||!this.state.strategy)return;
+    const codeId=this.state.strategy.codeId;
+    if(!codeId){ this.setState({backtestError:'백엔드 code_id가 없습니다. 먼저 코드를 생성(코드화)해 주세요.'}); return; }
     const market=normalizeUpbitMarket(this._backtestMarketInput.current?.value||this.state.backtestMarketDraft);
     const range={startDate:this._backtestStartInput.current?.value||this.state.backtestStartDate,endDate:this._backtestEndInput.current?.value||this.state.backtestEndDate};
     this.setState({backtesting:true,backtestError:'',backtestChartError:'',backtestMarket:market,backtestMarketDraft:market,backtestStartDate:range.startDate,backtestEndDate:range.endDate});
     try{
-      const result=await runBackendBacktest({market,startDate:range.startDate,endDate:range.endDate,strategyParams:this._codeParams});
+      const start=range.startDate?range.startDate+'T00:00:00':null;
+      const end=range.endDate?range.endDate+'T23:59:59':null;
+      const result=await runBacktestApi({codeId,market,timeframe:'1d',start,end,lookback:400});
       if(this._unmounted)return;
-      const backtest=result.backtest;
-      const candles=Array.isArray(result.chartCandles)&&result.chartCandles.length?result.chartCandles:backtest.candles;
+      const candles=Array.isArray(result.candles)?result.candles:[];
+      const rangeKey=market+':'+(result.period_start||start||'')+':'+(result.period_end||end||'');
+      const backtest={
+        rangeKey,
+        candles,
+        markers:result.markers||[],
+        eq:result.eq||[],
+        bh:result.bh||[],
+        metrics:result.metrics,
+        summary:{
+          market,
+          rangeKey,
+          fullCandleCount:candles.length,
+          rangeCandleCount:candles.length,
+          dataFrom:result.period_start,
+          dataTo:result.period_end,
+          from:result.period_start,
+          to:result.period_end,
+          requestedFrom:range.startDate,
+          requestedTo:range.endDate,
+          source:'백엔드 백테스트('+(result.timeframe||'1d')+') · 생성 코드 실행',
+        },
+      };
       const span=this._chartSpan('day');
       const cacheKey=market+':'+span.key;
       const chartKey=this._backtestChartKey(market,span.key);
@@ -579,7 +665,7 @@ class App extends React.Component {
       }));
     }catch(error){
       if(this._unmounted)return;
-      this.setState({backtesting:false,backtestError:error?.message||'업비트 데이터를 가져오지 못했습니다.'});
+      this.setState({backtesting:false,backtestError:error?.message||'백테스트 실패'});
     }
   };
   onMonitorMarket=(e)=>this.setState({monitorMarketDraft:e.target.value.toUpperCase(),monitorError:''});
@@ -589,7 +675,7 @@ class App extends React.Component {
     const market=normalizeUpbitMarket(value);
     this._mon={holding:false,entry:0};
     if(market===this.state.monitorMarket){
-      this.setState({monitorMarketDraft:market,monitorError:''},()=>{ this._pollSignal(); if(!this.state.monitorHistoryCandles.length) this._loadMonitorHistory(); });
+      this.setState({monitorMarketDraft:market,monitorError:''},()=>{ this._pollSignal(); this._connectBackendMonitor(); if(!this.state.monitorHistoryCandles.length) this._loadMonitorHistory(); });
       return;
     }
     this._open=null;
@@ -610,7 +696,7 @@ class App extends React.Component {
       monitorHistoryCandles:[],
       monitorHistoryLoading:false,
       monitorMarkers:[],
-    },()=>{ this._pollSignal(); this._loadMonitorHistory(); });
+    },()=>{ this._connectWs(); this._pollSignal(); this._connectBackendMonitor(); this._loadMonitorHistory(); });
   };
   onWebhook=(e)=>this.setState({webhookDraft:e.target.value});
   enableNotifications=()=>{ requestNotifyPermission().then(p=>this.setState({notifPerm:p})); };
@@ -733,7 +819,7 @@ class App extends React.Component {
       lastCandleTime:s.lastCandleTime,
       livePriceFmt:hasLivePrice?livePrice.toLocaleString():'-',
       topPriceColor,
-      navSurveyStyle:nav('survey'),navStrategyStyle:nav('strategy'),navBacktestStyle:nav('backtest'),navMonitorStyle:nav('monitor'),navChatStyle:nav('chat'),navSettingsStyle:nav('settings'),
+      navSurveyStyle:nav('survey'),navStrategyStyle:nav('strategy'),navBacktestStyle:nav('backtest'),navMonitorStyle:nav('monitor'),navSettingsStyle:nav('settings'),
       doneCount,
       freeSurveyLimit:FREE_SURVEY_LIMIT,
       maxSurveyCount,
@@ -751,8 +837,8 @@ class App extends React.Component {
       showPaymentConfirm:s.paymentPending&&!precisionUnlocked,
       startPrecisionCheckout:this.startPrecisionCheckout,
       unlockPrecisionPass:this.unlockPrecisionPass,
-      isSurvey:s.screen==='survey',isStrategy:s.screen==='strategy',isBacktest:s.screen==='backtest',isMonitor:s.screen==='monitor',isChat:s.screen==='chat',isSettings:s.screen==='settings',
-      goSurvey:this.goSurvey,goStrategy:this.goStrategy,goBacktest:this.goBacktest,goMonitor:this.goMonitor,goChat:this.goChat,goSettings:this.goSettings,
+      isSurvey:s.screen==='survey',isStrategy:s.screen==='strategy',isBacktest:s.screen==='backtest',isMonitor:s.screen==='monitor',isSettings:s.screen==='settings',
+      goSurvey:this.goSurvey,goStrategy:this.goStrategy,goBacktest:this.goBacktest,goMonitor:this.goMonitor,goSettings:this.goSettings,
       progressWidth:(doneCount/maxSurveyCount*100)+'%',
       curMarket:cur.market,curTf:cur.tf,surveyNo:s.surveyIndex+1,
       surveyTitle:cur.title,surveyIntent:cur.intent,surveyReason:cur.reason,surveyTags:cur.tags||[],
@@ -774,6 +860,7 @@ class App extends React.Component {
       hasResponses:doneCount>0,noResponses:doneCount===0,
       contextItems:ctx,
       codifying:s.codifying,notCodifying:!s.codifying,
+      codifyError:s.codifyError,hasCodifyError:!!s.codifyError,
       runCodify:this.runCodify,
       codifyStyle:brandBtn(!canCodify,s.codifying),
       codifyLabel:!canCodify?('설문 '+freeRemaining+'개 더 필요'):(s.strategy?'코드 재생성 ↻ (컨텍스트 누적)':'코드화 실행 →'),
@@ -806,6 +893,8 @@ class App extends React.Component {
       consistencyPct:cons?cons.pct:0,consistencyTotal:cons?cons.total:0,consistencyWidth:cons?(cons.pct+'%'):'0%',
       hasMismatch:!!cons&&cons.mism.length>0,noMismatch:!!cons&&cons.mism.length===0,mismatchItems:mism,
       monNeedStrategy:!s.strategy,
+      backendMonStatus:s.backendMonStatus,backendMonLive:s.backendMonStatus==='connected',
+      monitorSource:(s.strategy&&s.strategy.codeId)?'백엔드 실시간(생성 코드 실행)':'로컬 판단',
       signalText:s.signal==='BUY'?'BUY · 매수 신호':s.signal==='SELL'?'SELL · 매도 신호':'HOLD · 관망',
       signalColor:s.signal==='BUY'?'#22c55e':s.signal==='SELL'?'#ef4444':'#f59e0b',
       signalReason:s.signalReason,
@@ -849,12 +938,12 @@ class App extends React.Component {
               {v.isStrategy && <StrategyTab v={v} />}
               {v.isBacktest && <BacktestTab v={v} />}
               {v.isMonitor && <MonitorTab v={v} />}
-              {v.isChat && <ChatTab v={v} />}
               {v.isSettings && <SettingsTab v={v} />}
             </div>
           </div>
         </div>
         <AlertToasts toasts={v.toasts} onClose={v.dismissToast} />
+        <ChatWidget />
       </div>
     );
   }

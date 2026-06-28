@@ -1,5 +1,6 @@
+import { API_BASE_URL } from "./api/base.js";
+
 const SESSION_KEY = "tt_session";
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
 function readJSON(key, fallback) {
   try {
@@ -50,7 +51,7 @@ async function requestJSON(path, { method = "GET", body, auth = false } = {}) {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new Error("백엔드 서버에 연결할 수 없습니다. 서버 실행 상태와 VITE_API_BASE_URL을 확인하세요.");
+    throw new Error("백엔드 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
   }
 
   const contentType = response.headers.get("content-type") || "";
