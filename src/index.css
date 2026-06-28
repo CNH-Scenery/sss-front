@@ -9,6 +9,19 @@ body { margin: 0; }
 textarea, input { font-family: 'Pretendard', sans-serif; }
 textarea:focus, input:focus { outline: none; border-color: #4f8cff !important; }
 
+.tt-indicator-card {
+  align-self: start;
+}
+
+.tt-indicator-row span:first-child {
+  min-width: 0;
+}
+
+.tt-indicator-row span:last-child {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .tt-app {
     height: auto !important;
@@ -87,6 +100,12 @@ textarea:focus, input:focus { outline: none; border-color: #4f8cff !important; }
   .tt-survey-grid,
   .tt-survey-meta-grid {
     grid-template-columns: 1fr !important;
+  }
+  .tt-indicator-card {
+    padding: 12px !important;
+  }
+  .tt-indicator-row {
+    padding: 5px 2px !important;
   }
   .tt-choice-row {
     flex-direction: column !important;

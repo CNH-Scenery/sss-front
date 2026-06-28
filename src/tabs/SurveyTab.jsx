@@ -18,8 +18,8 @@ export default function SurveyTab({ v }) {
                   </div>
                 </div>
 
-                <div className="tt-survey-grid" style={css(`display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:stretch`)}>
-                  <div style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:16px`)}>
+                <div className="tt-survey-grid" style={css(`display:grid;grid-template-columns:minmax(0,1.9fr) minmax(260px,.7fr);gap:16px;align-items:start`)}>
+                  <div className="tt-chart-card" style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:16px;min-width:0`)}>
                     <div style={css(`display:flex;align-items:center;justify-content:space-between;margin-bottom:12px`)}>
                       <div style={css(`display:flex;align-items:center;gap:8px`)}>
                         <span style={css(`font-weight:700;font-size:15px`)}>{v.curMarket}</span>
@@ -72,12 +72,12 @@ export default function SurveyTab({ v }) {
                     </div>
                   </div>
 
-                  <div style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:16px`)}>
+                  <div className="tt-indicator-card" style={css(`background:#11151c;border:1px solid #1f2630;border-radius:12px;padding:14px;min-width:0`)}>
                     <div style={css(`font-size:12px;font-weight:700;color:#9aa4b1;letter-spacing:0.02em;margin-bottom:3px`)}>지표 스냅샷</div>
                     <div style={css(`font-size:10.5px;color:#5a6472;margin-bottom:10px`)}>이 시점의 숫자가 응답과 함께 저장됩니다</div>
                     <div style={css(`display:flex;flex-direction:column`)}>
                       {v.featureRows.map((row, i) => (
-                        <div key={i} style={css(`display:flex;align-items:center;justify-content:space-between;padding:8px 2px;border-bottom:1px solid #161c25`)}>
+                        <div className="tt-indicator-row" key={i} style={css(`display:flex;align-items:center;justify-content:space-between;padding:6px 2px;border-bottom:1px solid #161c25;gap:12px`)}>
                           <span style={css(`font-size:12.5px;color:#9aa4b1`)}>{row.label}</span>
                           <span style={{ fontFamily: "'JetBrains Mono',monospace", fontSize: '13px', fontWeight: 600, color: row.color }}>{row.value}</span>
                         </div>
