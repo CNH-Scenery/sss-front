@@ -15,13 +15,15 @@
 //   });
 //   // result 는 마지막 done 이벤트: { code, passed, iterations, model_name, report, code_id }
 
+import { API_BASE_URL } from "./base.js";
+
 export async function generateTradingCode({
   prompt,
   maxIterations,
   onEvent,
   signal,
 }) {
-  const res = await fetch("/api/trading-code/generate/stream", {
+  const res = await fetch(`${API_BASE_URL}/api/trading-code/generate/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, max_iterations: maxIterations ?? null }),
@@ -63,7 +65,7 @@ export async function generateTradingCode({
 
 // 비스트리밍 버전 — 최종 결과만 필요할 때.
 export async function generateTradingCodeOnce({ prompt, maxIterations, signal }) {
-  const res = await fetch("/api/trading-code/generate", {
+  const res = await fetch(`${API_BASE_URL}/api/trading-code/generate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt, max_iterations: maxIterations ?? null }),
