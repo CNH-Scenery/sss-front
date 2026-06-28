@@ -1,0 +1,10 @@
+* { box-sizing: border-box; }
+body { margin: 0; }
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #26303d; border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+@keyframes tt-spin { to { transform: rotate(360deg); } }
+@keyframes tt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes tt-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+textarea, input { font-family: 'Pretendard', sans-serif; }
+textarea:focus, input:focus { outline: none; border-color: #4f8cff !important; }
